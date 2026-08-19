@@ -1,0 +1,19 @@
+[package]
+name = "RustyRelay"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+bytes = "1.12.1"
+getrandom = "0.4.3"
+rand = "0.10.2"
+slab = "0.4.12"
+snow = "0.10.0"
+tokio = { version = "1", features = ["full"] }
+packet_macro = {path = "./src/networking/packethandler/packet_macro"}
+packet_handler_macro = {path = "./src/networking/packethandler/packet_handler_macro"}
+version_macro = {path = "./src/util/version_macro"}
+arc-swap = "1.9.2"

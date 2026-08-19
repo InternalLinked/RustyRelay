@@ -1,0 +1,14 @@
+[package]
+name = "packet_macro"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+bytes = "1"
+proc-macro = true
+
+[dependencies]
+bytes = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0.107"

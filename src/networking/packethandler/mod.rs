@@ -4,11 +4,11 @@ pub mod packets;
 use std::io::{self};
 
 use crate::networking::packethandler::packet::DynamicPacket;
-use crate::networking::server::tcp::tcp_client_handle::{ClientHandle, ClientInstance};
+use crate::networking::server::tcp::tcp_client_handle::{ClientHandle};
 use crate::{util::ServerHandle};
 use crate::networking::packethandler::packets::ack_packet::AckPacket;
 use crate::util::{ServerCallback, ServerInstance};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use packet_handler_macro::{
     dispatch_packet_client_impl, dispatch_packet_impl, dispatch_packet_server_impl,
 };
@@ -24,8 +24,8 @@ macro_rules! register_packets {
         }
 
         macro_rules! dispatch_packet_server {
-            ($client_handle:expr) => {
-                //dispatch_packet_server_impl!($client_handle, $($packet),*)
+            ($bytes:expr, $client_handle:expr) => {
+                dispatch_packet_server_impl!($bytes, $client_handle, $($packet),*)
             };
         }
         macro_rules! dispatch_packet_client {
@@ -45,6 +45,9 @@ register_packets!(
     AckPacket,
 );
 
+
+
+
 pub struct ClientPacketHandler;
 
 impl ClientPacketHandler {
@@ -58,9 +61,8 @@ impl ClientPacketHandler {
 pub struct ServerPacketHandler;
 
 impl ServerPacketHandler {
-    pub fn handle_packet(client_handle: &mut ClientHandle) -> ServerCallback {
-        //dispatch_packet_server!(client_handle)
-        ServerCallback::Pass
+    pub fn handle_packet(bytes: &mut BytesMut, client_handle: &mut ClientHandle) -> ServerCallback {
+        dispatch_packet_server!(bytes, client_handle)
     }
 }
 

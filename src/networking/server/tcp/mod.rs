@@ -2,6 +2,7 @@ pub mod tcp_client_handle;
 
 use std::{net::SocketAddr};
 
+use dashmap::DashMap;
 use slab::Slab;
 use tokio::{net::TcpListener, runtime::Runtime};
 
@@ -9,7 +10,8 @@ use crate::networking::server::tcp::tcp_client_handle::ClientHandle;
 
 pub struct TCPServerCore {
     listener: TcpListener,
-    connections: Slab<usize>,
+    clients: DashMap<usize, ClientHandle>,
+    next_id: usize,
 }
 
 impl TCPServerCore {
@@ -21,7 +23,7 @@ impl TCPServerCore {
         rt.block_on(async {
 
             let listener = TcpListener::bind(address).await.unwrap();
-            let mut core = TCPServerCore { listener, connections: Slab::new() };
+            let mut core = TCPServerCore { listener, clients: DashMap::new(), next_id: 0 };
             core.listen().await.unwrap();
 
 
@@ -35,11 +37,9 @@ impl TCPServerCore {
 
             let (stream, address) = self.listener.accept().await?;
             println!("New connection from {}", address);
-
-            tokio::spawn(async move {
-                let client = ClientHandle::new(stream).await;
-
-            });
+            let client = ClientHandle::new(stream, self.next_id).await;
+            self.clients.insert(self.next_id, client);
+            self.next_id += 1;
 
         }
 

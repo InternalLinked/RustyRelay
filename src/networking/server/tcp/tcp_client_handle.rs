@@ -23,18 +23,23 @@ pub struct ClientInstance {
 #[derive(Clone)]
 pub struct ClientHandle {
     sender: Sender<Box<dyn Packet + Send>>,
+    id: usize
 }
 
 impl ClientHandle {
-    pub async fn new(stream: TcpStream) -> Self {
+    pub async fn new(stream: TcpStream, id: usize) -> Self {
         println!("Instantiate");
-        ClientContext::instantiate(stream).await
+        ClientContext::instantiate(stream, id).await
     }
 
     pub async fn send(&mut self, packet: impl Packet + 'static) {
         if self.sender.send(Box::new(packet)).await.is_err() {
-            // receiver half was dropped -> connection task is gone
+            todo!("Handle closed client");
         }
+    }
+
+    pub fn get_id(&self) -> usize {
+        self.id
     }
 }
 
@@ -47,9 +52,9 @@ struct ClientContext {
 }
 
 impl ClientContext {
-    pub async fn instantiate(stream: TcpStream) -> ClientHandle {
+    pub async fn instantiate(stream: TcpStream, id: usize) -> ClientHandle {
         let (sender, receiver) = mpsc::channel::<Box<dyn Packet + Send>>(32);
-        let client_handle = ClientHandle { sender };
+        let client_handle = ClientHandle { sender, id };
 
         let (read_half, write_half) = stream.into_split();
 
@@ -61,7 +66,6 @@ impl ClientContext {
             client_handle: client_handle.clone()
         };
 
-        // This was missing before - the context was built but never driven.
         tokio::spawn(async move {
             context.run().await;
         });
@@ -69,11 +73,10 @@ impl ClientContext {
     }
 
     pub async fn run(&mut self) {
-        // Both handlers already loop internally until the connection ends,
-        // so we just race them once - no extra outer loop.
+
         println!("Running loop");
         tokio::select! {
-            callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle) => {
+            _callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle) => {
                 
             }
             _ = Self::handle_write_event(&mut self.write_half, &mut self.receiver) => {
@@ -81,8 +84,6 @@ impl ClientContext {
                 // channel closed (all ClientHandles dropped)
             }
         }
-        // Whichever side finishes first, the other is cancelled here and
-        // both halves get dropped, closing the socket.
     }
 
     async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut ClientHandle) -> ServerCallback {
@@ -95,20 +96,15 @@ impl ClientContext {
                 Ok(0) => return ServerCallback::Kill,
                 Ok(_n) => {
                     // parse packets out of read_buffer here
-                    println!("Got packet woow");
-
-                    let pkg = AckPacket::new(1, b"dynamic_payload") ;
-
-                    client_handle.send(pkg).await;
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return ServerCallback::Error(e),
             }
 
-            // match ServerPacketHandler::handle_packet(&mut read_buffer) {
-            //     ServerCallback::Pass => continue,
-            //     other => return other,
-            // }
+            match ServerPacketHandler::handle_packet(&mut read_buffer, client_handle) {
+                 ServerCallback::Pass => continue,
+                 other => return other,
+            }
         }
     }
 

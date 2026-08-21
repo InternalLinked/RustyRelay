@@ -62,8 +62,6 @@ pub fn dispatch_packet_impl(input: TokenStream) -> TokenStream {
                 let mut packet_buf: ::bytes::Bytes = #bytes.split_to(packet_total_size);
                 let packet = <#packet>::from(&mut packet_buf).unwrap();
                 return PacketResponse::#packet(packet);
-                /*let client_instance: &mut ClientInstance = __handle.get_client_instance();
-                packet.on_trigger_server(client_instance);*/
             }
         }
     });
@@ -103,15 +101,32 @@ impl Parse for DispatchInputImpl {
         Ok(DispatchInputImpl { handle, packets })
     }
 }
+
+struct DispatchInputServer {
+    bytes: Expr,
+    client_handle: Expr,
+    packets: Punctuated<Type, Token![,]>,
+}
+
+impl Parse for DispatchInputServer {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let bytes: Expr = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let client_handle: Expr = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let packets = Punctuated::parse_terminated(input)?;
+        Ok(DispatchInputServer { bytes, client_handle, packets })
+    }
+}
  
 #[proc_macro]
 pub fn dispatch_packet_server_impl(input: TokenStream) -> TokenStream {
-    let DispatchInputImpl { handle, packets } = parse_macro_input!(input as DispatchInputImpl);
+    let DispatchInputServer { bytes, client_handle, packets } = parse_macro_input!(input as DispatchInputServer);
  
     let arms = packets.iter().map(|packet| {
         quote! {
             <#packet>::ID => {
-                if __handle.get_buffer().len() < <#packet>::CAPACITY {
+                if #bytes.len() < <#packet>::CAPACITY {
                     // Not enough bytes yet for even the fixed part of this
                     // packet. Leave everything where it is (it's already at
                     // the front of the buffer) and wait for the next read.
@@ -120,14 +135,13 @@ pub fn dispatch_packet_server_impl(input: TokenStream) -> TokenStream {
  
                 let packet_total_size: usize = if <#packet>::DYNAMIC {
                     let dynamic_size: usize = {
-                        let buffer = __handle.get_buffer();
                         let cursor: usize = if <#packet>::AWAITABLE { 9 } else { 1 };
-                        usize::from_be_bytes(buffer[cursor..cursor + 8].try_into().unwrap())
+                        usize::from_be_bytes(#bytes[cursor..cursor + 8].try_into().unwrap())
                     };
  
                     let total_size = <#packet>::CAPACITY + dynamic_size;
  
-                    if __handle.get_buffer().len() < total_size {
+                    if #bytes.len() < total_size {
                         break;
                     }
  
@@ -141,30 +155,28 @@ pub fn dispatch_packet_server_impl(input: TokenStream) -> TokenStream {
                 // resulting `BytesMut` into the read-only `Bytes` that
                 // `from` now expects, still zero-copy. Whatever's left in
                 // the read buffer stays there for the next packet.
-                let mut packet_buf: ::bytes::Bytes =
-                    __handle.get_buffer_mut().split_to(packet_total_size).freeze();
+                let mut packet_buf: ::bytes::Bytes = #bytes.split_to(packet_total_size).freeze();
                 let packet = <#packet>::from(&mut packet_buf).unwrap();
-                let client_instance: &mut ClientInstance = __handle.get_client_instance();
-                packet.on_trigger_server(client_instance);
+                packet.on_trigger_server(#client_handle);
             }
         }
     });
  
     quote! {
         {
-            let __handle = #handle;
+            
             loop {
-                if __handle.get_buffer().is_empty() {
+                if #bytes.is_empty() {
                     break;
                 }
  
-                let id: u8 = __handle.get_buffer()[0];
+                let id: u8 = #bytes[0];
  
                 match id {
                     #(#arms)*
                     _ => {
                         println!("[Server] Unknown packet {}", id);
-                        println!("{:?}", __handle.get_buffer());
+                        println!("{:?}", #bytes);
                         return ServerCallback::Kill;
                     }
                 }

@@ -17,3 +17,4 @@ packet_macro = {path = "./src/networking/packethandler/packet_macro"}
 packet_handler_macro = {path = "./src/networking/packethandler/packet_handler_macro"}
 version_macro = {path = "./src/util/version_macro"}
 arc-swap = "1.9.2"
+dashmap = "6.2.1"

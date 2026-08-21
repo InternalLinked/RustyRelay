@@ -11,6 +11,12 @@ pub struct AckPacket {
 
 impl AckPacket {
     pub async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+        client_handle.counter += 1;
+        //println!("Count {} ", client_handle.counter);
+        if client_handle.counter >= 1000000 {
+            println!("Worked!");
+        }
+
         if 0 != self.read_request() {
             //println!("Message {}", str::from_utf8(self.get_dynamic().as_ref()).unwrap());
             let packet = AckPacket::new(0, b"test");

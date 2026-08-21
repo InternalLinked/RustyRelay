@@ -19,9 +19,9 @@ impl test {
 fn main() {
 
 
-    let d = test::bla(12);
+    //let d = test::bla(12);
 
 
-    //TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
+    TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
 
 }

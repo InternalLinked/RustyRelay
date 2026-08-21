@@ -4,13 +4,7 @@ use arc_swap::ArcSwap;
 use bytes::BytesMut;
 use tokio::{io::{self, AsyncReadExt, AsyncWriteExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::{networking::packethandler::{ PacketResponse, ServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, util::{EncryptionState, LobbyState, ServerCallback}};
-
-
-pub enum PacketRequest {
-    LosePacket(Box<dyn Packet>),
-    AwaitPacket(Box<dyn Packet>, oneshot::Sender<PacketResponse>),
-}
+use crate::{networking::packethandler::{ AnyPacket, ServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, util::{EncryptionState, LobbyState, ServerCallback}};
 
 
 pub struct ClientInstance {
@@ -22,8 +16,9 @@ pub struct ClientInstance {
 
 #[derive(Clone)]
 pub struct ClientHandle {
-    sender: Sender<Box<dyn Packet + Send>>,
-    id: usize
+    sender: Sender<AnyPacket>,
+    id: usize,
+    pub counter: usize, 
 }
 
 impl ClientHandle {
@@ -32,8 +27,8 @@ impl ClientHandle {
         ClientContext::instantiate(stream, id).await
     }
 
-    pub async fn send(&mut self, packet: impl Packet + 'static) {
-        if self.sender.send(Box::new(packet)).await.is_err() {
+    pub async fn send(&mut self, packet: AnyPacket) {
+        if self.sender.send(packet).await.is_err() {
             todo!("Handle closed client");
         }
     }
@@ -46,15 +41,15 @@ impl ClientHandle {
 struct ClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
-    receiver: Receiver<Box<dyn Packet + Send>>,
+    receiver: Receiver<AnyPacket>,
     encryption_state: EncryptionState,
     client_handle: ClientHandle,
 }
 
 impl ClientContext {
     pub async fn instantiate(stream: TcpStream, id: usize) -> ClientHandle {
-        let (sender, receiver) = mpsc::channel::<Box<dyn Packet + Send>>(32);
-        let client_handle = ClientHandle { sender, id };
+        let (sender, receiver) = mpsc::channel::<AnyPacket>(32);
+        let client_handle = ClientHandle { sender, id, counter: 0 };
 
         let (read_half, write_half) = stream.into_split();
 
@@ -101,16 +96,17 @@ impl ClientContext {
                 Err(e) => return ServerCallback::Error(e),
             }
 
-            match ServerPacketHandler::handle_packet(&mut read_buffer, client_handle) {
+            match ServerPacketHandler::handle_packet(&mut read_buffer, client_handle).await {
                  ServerCallback::Pass => continue,
                  other => return other,
             }
         }
     }
 
+
     async fn handle_write_event(
         write_half: &mut OwnedWriteHalf,
-        receiver: &mut Receiver<Box<dyn Packet + Send>>,
+        receiver: &mut Receiver<AnyPacket>,
     ) {
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 

@@ -10,11 +10,10 @@ pub struct AckPacket {
 }
 
 impl AckPacket {
-    pub fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+    pub async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
         if 0 != self.read_request() {
             //println!("Message {}", str::from_utf8(self.get_dynamic().as_ref()).unwrap());
             let packet = AckPacket::new(0, b"test");
-            
 
         }
         ServerCallback::Pass

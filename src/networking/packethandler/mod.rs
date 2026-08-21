@@ -9,6 +9,7 @@ use crate::{util::ServerHandle};
 use crate::networking::packethandler::packets::ack_packet::AckPacket;
 use crate::util::{ServerCallback, ServerInstance};
 use bytes::{Bytes, BytesMut};
+use crate::networking::packethandler::packet::Packet;
 use packet_handler_macro::{
     dispatch_packet_client_impl, dispatch_packet_impl, dispatch_packet_server_impl,
 };
@@ -22,6 +23,31 @@ macro_rules! register_packets {
                 $packet($packet),
             )*
         }
+        
+        impl PacketResponse {
+            pub fn get_id(&self) -> u8 {
+                match self {
+                    $(
+                    PacketResponse::$packet(p) => p.get_id(),
+                    )*
+                    _ => 0,
+
+                }
+            }
+
+            pub async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+                match self {
+                    $(
+                    PacketResponse::$packet(p) => p.on_trigger_server(client_handle).await,
+                    )*
+                    _ => ServerCallback::Kill,
+
+                }
+            }
+            
+        }
+
+
 
         macro_rules! dispatch_packet_server {
             ($bytes:expr, $client_handle:expr) => {

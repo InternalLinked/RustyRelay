@@ -20,7 +20,7 @@ pub trait Packet: Send + Sync {
     fn is_awaitable(&self) -> bool;
 
     /* This is the code that gets triggered if the server recieves the packet*/
-    fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+    async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
     }

@@ -1,8 +1,6 @@
-use std::{any, net::SocketAddr};
-
-use arc_swap::ArcSwap;
-use bytes::BytesMut;
-use tokio::{io::{self, AsyncReadExt, AsyncWriteExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
+use bytes::{Buf, BytesMut};
+use tokio::io::AsyncWriteExt;
+use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
@@ -121,9 +119,21 @@ impl TCPClientContext {
             if let Some(instruction) = receiver.recv().await {
                 match instruction {
                     ClientContextInstruction::AnyPacket(mut packet) => {
-                        let encoded = packet.encode(&mut write_buffer).unwrap();
-                        if write_half.write_all(&encoded).await.is_err() {
-                            break;
+                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
+
+
+                        match dynamic {
+                            Some(payload) => {
+                                let mut combined = fixed.chain(payload);
+                                if write_half.write_all_buf(&mut combined).await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => {
+                                if write_half.write_all_buf(&mut fixed).await.is_err() {
+                                    break;
+                                }
+                            }
                         }
                     },
                     ClientContextInstruction::Close => {

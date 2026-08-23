@@ -13,25 +13,34 @@ impl<T: Packet + Awaitable> AwaitablePacket for T {}
 pub trait Packet: Send + Sync {
     fn get_id(&self) -> u8;
 
-    fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes>;
+    fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)>;
 
     fn get_size(&self) -> usize;
 
-    fn is_awaitable(&self) -> bool;
-
     /* This is the code that gets triggered if the server recieves the packet*/
-    async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
+    async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
     }
 
     /* This is the code that gets triggered if the client recieves the packet*/
-    fn on_trigger_client(&self, server_instance: &mut ServerInstance) {
+    async fn on_trigger_client_tcp(&self, server_instance: &mut ServerInstance) {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_client for a packet :)");
     }
 
-    fn get_nonce(&self) -> Option<u64>;
+    async fn on_trigger_server_udp(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
+        /*! Leave this here !*/
+        todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
+    }
+
+    /* This is the code that gets triggered if the client recieves the packet*/
+    async fn on_trigger_client_udp(&self, server_instance: &mut ServerInstance) {
+        /*! Leave this here !*/
+        todo!("Litte note that you forgot to implement on_trigger_client for a packet :)");
+    }
+
+    fn get_nonce(&self) -> u64;
 
     fn set_nonce(&mut self, nonce: u64);
 

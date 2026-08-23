@@ -40,7 +40,7 @@ pub fn dispatch_packet_impl(input: TokenStream) -> TokenStream {
  
                 let packet_total_size: usize = if <#packet>::DYNAMIC {
                     let dynamic_size: usize = {
-                        let cursor: usize = if <#packet>::AWAITABLE { 9 } else { 1 };
+                        let cursor: usize = 9;
                         usize::from_be_bytes(#bytes[cursor..cursor + 8].try_into().unwrap())
                     };
  

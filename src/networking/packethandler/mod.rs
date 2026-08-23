@@ -45,7 +45,7 @@ macro_rules! register_packets {
                 }
             }
 
-            pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes> {
+            pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)> {
                 match self {
                     $(
                     AnyPacket::$packet(p) => p.encode(buf),

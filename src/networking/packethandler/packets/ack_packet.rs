@@ -1,4 +1,4 @@
-use crate::{networking::{packethandler::packet::Packet, server::tcp::tcp_client_handle::ClientHandle}, util::{ServerCallback, ServerInstance}};
+use crate::{networking::{packethandler::packet::Packet, server::tcp::tcp_client_handle::TCPClientHandle}, util::{ServerCallback, ServerInstance}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -10,7 +10,7 @@ pub struct AckPacket {
 }
 
 impl AckPacket {
-    pub async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+    pub async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle) -> ServerCallback {
         client_handle.counter += 1;
         //println!("Count {} ", client_handle.counter);
         if client_handle.counter >= 1000000 {

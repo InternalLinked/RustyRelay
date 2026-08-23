@@ -4,7 +4,7 @@ pub mod packets;
 use std::io::{self};
 
 use crate::networking::packethandler::packet::DynamicPacket;
-use crate::networking::server::tcp::tcp_client_handle::{ClientHandle};
+use crate::networking::server::tcp::tcp_client_handle::{TCPClientHandle};
 use crate::{util::ServerHandle};
 use crate::networking::packethandler::packets::ack_packet::AckPacket;
 use crate::util::{ServerCallback, ServerInstance};
@@ -34,7 +34,7 @@ macro_rules! register_packets {
                 }
             }
 
-            pub async fn on_trigger_server(&self, client_handle: &mut ClientHandle) -> ServerCallback {
+            pub async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle) -> ServerCallback {
                 match self {
                     $(
                     AnyPacket::$packet(p) => p.on_trigger_server(client_handle).await,
@@ -84,7 +84,7 @@ impl ClientPacketHandler {
 pub struct ServerPacketHandler;
 
 impl ServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut ClientHandle) -> ServerCallback {
+    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle) -> ServerCallback {
         
         loop {
             match dispatch_packet(bytes) {

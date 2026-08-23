@@ -1,16 +1,16 @@
 pub mod tcp_client_handle;
+pub mod lobby_handler;
 
 use std::{net::SocketAddr};
 
 use dashmap::DashMap;
-use slab::Slab;
 use tokio::{net::TcpListener, runtime::Runtime};
 
-use crate::networking::server::tcp::tcp_client_handle::ClientHandle;
+use crate::networking::server::tcp::tcp_client_handle::TCPClientHandle;
 
 pub struct TCPServerCore {
     listener: TcpListener,
-    clients: DashMap<usize, ClientHandle>,
+    clients: DashMap<usize, TCPClientHandle>,
     next_id: usize,
 }
 
@@ -37,7 +37,7 @@ impl TCPServerCore {
 
             let (stream, address) = self.listener.accept().await?;
             println!("New connection from {}", address);
-            let client = ClientHandle::new(stream, self.next_id).await;
+            let client = TCPClientHandle::new(stream, self.next_id).await;
             self.clients.insert(self.next_id, client);
             self.next_id += 1;
 

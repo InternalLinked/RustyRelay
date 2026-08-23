@@ -4,18 +4,6 @@ use crate::networking::server::tcp::TCPServerCore;
 mod util;
 mod networking;
 
-enum test {
-    bla(u32),
-}
-
-impl test {
-
-    fn u(&self) {
-        
-    }
-
-}
-
 fn main() {
 
 

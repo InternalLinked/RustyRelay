@@ -7,24 +7,16 @@ use tokio::{io::{self, AsyncReadExt, AsyncWriteExt}, net::{TcpStream, tcp::{Owne
 use crate::{networking::packethandler::{ AnyPacket, ServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, util::{EncryptionState, LobbyState, ServerCallback}};
 
 
-pub struct ClientInstance {
-    pub(crate) encryption: EncryptionState,
-    pub(crate) lobby_state: LobbyState,
-}
-
-
-
 #[derive(Clone)]
-pub struct ClientHandle {
+pub struct TCPClientHandle {
     sender: Sender<AnyPacket>,
     id: usize,
     pub counter: usize, 
 }
 
-impl ClientHandle {
+impl TCPClientHandle {
     pub async fn new(stream: TcpStream, id: usize) -> Self {
-        println!("Instantiate");
-        ClientContext::instantiate(stream, id).await
+        TCPClientContext::instantiate(stream, id).await
     }
 
     pub async fn send(&mut self, packet: AnyPacket) {
@@ -38,22 +30,22 @@ impl ClientHandle {
     }
 }
 
-struct ClientContext {
+struct TCPClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
     receiver: Receiver<AnyPacket>,
     encryption_state: EncryptionState,
-    client_handle: ClientHandle,
+    client_handle: TCPClientHandle,
 }
 
-impl ClientContext {
-    pub async fn instantiate(stream: TcpStream, id: usize) -> ClientHandle {
+impl TCPClientContext {
+    pub async fn instantiate(stream: TcpStream, id: usize) -> TCPClientHandle {
         let (sender, receiver) = mpsc::channel::<AnyPacket>(32);
-        let client_handle = ClientHandle { sender, id, counter: 0 };
+        let client_handle = TCPClientHandle { sender, id, counter: 0 };
 
         let (read_half, write_half) = stream.into_split();
 
-        let mut context = ClientContext {
+        let mut context = TCPClientContext {
             read_half,
             write_half,
             receiver,
@@ -81,8 +73,7 @@ impl ClientContext {
         }
     }
 
-    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut ClientHandle) -> ServerCallback {
-        println!("Handling packet");
+    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientHandle) -> ServerCallback {
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         loop {
             read_buffer.reserve(MAX_TCP_LENGTH);

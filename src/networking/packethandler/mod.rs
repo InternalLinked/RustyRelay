@@ -4,6 +4,7 @@ pub mod packets;
 use std::io::{self};
 
 use crate::networking::packethandler::packet::DynamicPacket;
+use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientHandle};
 use crate::{util::ServerHandle};
 use crate::networking::packethandler::packets::ack_packet::AckPacket;
@@ -34,10 +35,10 @@ macro_rules! register_packets {
                 }
             }
 
-            pub async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle) -> ServerCallback {
+            pub async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
                 match self {
                     $(
-                    AnyPacket::$packet(p) => p.on_trigger_server(client_handle).await,
+                    AnyPacket::$packet(p) => p.on_trigger_server(client_handle, lobby_manager).await,
                     )*
                     _ => ServerCallback::Kill,
 
@@ -81,16 +82,16 @@ impl ClientPacketHandler {
     }
 }
 
-pub struct ServerPacketHandler;
+pub struct TCPServerPacketHandler;
 
-impl ServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle) -> ServerCallback {
+impl TCPServerPacketHandler {
+    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
         
         loop {
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
-                other => { other.on_trigger_server(client_handle).await;}
+                other => { other.on_trigger_server(client_handle, lobby_manager).await;}
 
             }
         }

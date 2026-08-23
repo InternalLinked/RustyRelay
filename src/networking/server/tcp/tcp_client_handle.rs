@@ -4,28 +4,41 @@ use arc_swap::ArcSwap;
 use bytes::BytesMut;
 use tokio::{io::{self, AsyncReadExt, AsyncWriteExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::{networking::packethandler::{ AnyPacket, ServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, util::{EncryptionState, LobbyState, ServerCallback}};
+use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
+enum ClientContextInstruction {
+    Close, 
+    AnyPacket(AnyPacket)
+}
 
 #[derive(Clone)]
 pub struct TCPClientHandle {
-    sender: Sender<AnyPacket>,
+    sender: Sender<ClientContextInstruction>,
     id: usize,
     pub counter: usize, 
 }
 
 impl TCPClientHandle {
-    pub async fn new(stream: TcpStream, id: usize) -> Self {
-        TCPClientContext::instantiate(stream, id).await
+    pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientHandle>) -> Self {
+        TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
+}
 
-    pub async fn send(&mut self, packet: AnyPacket) {
-        if self.sender.send(packet).await.is_err() {
+impl StreamHandle for TCPClientHandle {
+
+    async fn send(&mut self, packet: AnyPacket) {
+        if self.sender.send(ClientContextInstruction::AnyPacket(packet)).await.is_err() {
             todo!("Handle closed client");
         }
     }
 
-    pub fn get_id(&self) -> usize {
+    async fn close(&mut self) {
+        if self.sender.send(ClientContextInstruction::Close).await.is_err() {
+            todo!("Handle closed client");
+        }
+    }
+
+    fn get_id(&self) -> usize {
         self.id
     }
 }
@@ -33,14 +46,15 @@ impl TCPClientHandle {
 struct TCPClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
-    receiver: Receiver<AnyPacket>,
+    receiver: Receiver<ClientContextInstruction>,
     encryption_state: EncryptionState,
     client_handle: TCPClientHandle,
+    lobby_manager: LobbyManagerHandle<TCPClientHandle>,
 }
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, id: usize) -> TCPClientHandle {
-        let (sender, receiver) = mpsc::channel::<AnyPacket>(32);
+    pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientHandle>) -> TCPClientHandle {
+        let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
         let client_handle = TCPClientHandle { sender, id, counter: 0 };
 
         let (read_half, write_half) = stream.into_split();
@@ -50,7 +64,8 @@ impl TCPClientContext {
             write_half,
             receiver,
             encryption_state: EncryptionState::Unsecure,
-            client_handle: client_handle.clone()
+            client_handle: client_handle.clone(),
+            lobby_manager
         };
 
         tokio::spawn(async move {
@@ -61,9 +76,8 @@ impl TCPClientContext {
 
     pub async fn run(&mut self) {
 
-        println!("Running loop");
         tokio::select! {
-            _callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle) => {
+            _callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle, &mut self.lobby_manager) => {
                 
             }
             _ = Self::handle_write_event(&mut self.write_half, &mut self.receiver) => {
@@ -71,9 +85,10 @@ impl TCPClientContext {
                 // channel closed (all ClientHandles dropped)
             }
         }
+        
     }
 
-    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientHandle) -> ServerCallback {
+    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         loop {
             read_buffer.reserve(MAX_TCP_LENGTH);
@@ -87,7 +102,7 @@ impl TCPClientContext {
                 Err(e) => return ServerCallback::Error(e),
             }
 
-            match ServerPacketHandler::handle_packet(&mut read_buffer, client_handle).await {
+            match TCPServerPacketHandler::handle_packet(&mut read_buffer, client_handle, lobby_manager).await {
                  ServerCallback::Pass => continue,
                  other => return other,
             }
@@ -97,17 +112,25 @@ impl TCPClientContext {
 
     async fn handle_write_event(
         write_half: &mut OwnedWriteHalf,
-        receiver: &mut Receiver<AnyPacket>,
+        receiver: &mut Receiver<ClientContextInstruction>,
     ) {
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
         loop {
 
-            if let Some(mut packet) = receiver.recv().await {
-                let encoded = packet.encode(&mut write_buffer).unwrap();
-                if write_half.write_all(&encoded).await.is_err() {
-                    break;
+            if let Some(instruction) = receiver.recv().await {
+                match instruction {
+                    ClientContextInstruction::AnyPacket(mut packet) => {
+                        let encoded = packet.encode(&mut write_buffer).unwrap();
+                        if write_half.write_all(&encoded).await.is_err() {
+                            break;
+                        }
+                    },
+                    ClientContextInstruction::Close => {
+                        return;
+                    }
                 }
+
             }
 
         }

@@ -6,7 +6,7 @@ use snow::params::NoiseParams;
 use tokio::{io::{self, AsyncReadExt}, net::TcpStream};
 use version_macro::packed_version;
 
-use crate::networking::packethandler::{ServerPacketHandler, packet::MAX_TCP_LENGTH};
+use crate::networking::packethandler::{TCPServerPacketHandler, packet::MAX_TCP_LENGTH};
 
 pub const RELAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELAY_VERSION_BYTES: u32 = packed_version!();

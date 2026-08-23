@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::{Bytes, BytesMut};
 
-use crate::{networking::server::tcp::tcp_client_handle::{TCPClientHandle}, util::{ServerCallback, ServerInstance}};
+use crate::{networking::server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientHandle}, util::{ServerCallback, ServerInstance}};
 
 pub static MAX_TCP_LENGTH: usize = 4096;
 pub static MAX_UDP_LENGTH: usize = 512;
@@ -20,7 +20,7 @@ pub trait Packet: Send + Sync {
     fn is_awaitable(&self) -> bool;
 
     /* This is the code that gets triggered if the server recieves the packet*/
-    async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle) -> ServerCallback {
+    async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
     }

@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, format_ident};
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
@@ -29,6 +29,16 @@ pub fn dispatch_packet_impl(input: TokenStream) -> TokenStream {
     let DispatchInput { bytes, packets } = parse_macro_input!(input as DispatchInput);
  
     let arms = packets.iter().map(|packet| {
+
+
+        let variant_ident = match packet {
+            Type::Path(type_path) => {
+                let ident = &type_path.path.segments.last().unwrap().ident;
+                format_ident!("{}Packet", ident)
+            }
+            _ => panic!("expected a simple type path"),
+        };
+
         quote! {
             <#packet>::ID => {
                 if #bytes.len() < <#packet>::CAPACITY {
@@ -61,7 +71,7 @@ pub fn dispatch_packet_impl(input: TokenStream) -> TokenStream {
                 // handle's buffer for the next packet.
                 let mut packet_buf: ::bytes::Bytes = #bytes.split_to(packet_total_size).freeze();
                 let packet = <#packet>::from(&mut packet_buf).unwrap();
-                return AnyPacket::#packet(packet);
+                return AnyPacket::#variant_ident(packet);
             }
         }
     });

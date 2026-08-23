@@ -1,4 +1,10 @@
-use crate::networking::server::tcp::TCPServerCore;
+use std::thread;
+
+use crate::networking::packethandler::{AnyPacket, packets::ack::Ack};
+use bytes::Bytes;
+use tokio::{net::TcpStream, runtime::Runtime};
+
+use crate::networking::{client::tcp::TCPClientHandle, server::{StreamHandle, tcp::TCPServerCore}};
 
 
 mod util;
@@ -9,7 +15,30 @@ fn main() {
 
     //let d = test::bla(12);
 
+    thread::spawn(move || {
+        TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
+    });
+    
 
-    TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
+    let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
+
+    let dna = Bytes::copy_from_slice(b"test");
+
+
+    let rt = Runtime::new().unwrap();
+
+    rt.block_on(async move {
+
+        let packet = Ack::new(1, dna);
+        let p = AnyPacket::AckPacket(packet);
+        handle.send(p).await;
+
+     }
+        
+    );
+
+    loop {
+        
+    }
 
 }

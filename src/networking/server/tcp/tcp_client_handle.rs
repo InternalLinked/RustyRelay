@@ -2,7 +2,7 @@ use bytes::{Buf, BytesMut};
 use tokio::io::AsyncWriteExt;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack_packet::AckPacket}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
+use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
 enum ClientContextInstruction {
     Close, 
@@ -10,19 +10,19 @@ enum ClientContextInstruction {
 }
 
 #[derive(Clone)]
-pub struct TCPClientHandle {
+pub struct TCPClientInstanceHandle {
     sender: Sender<ClientContextInstruction>,
     id: usize,
     pub counter: usize, 
 }
 
-impl TCPClientHandle {
-    pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientHandle>) -> Self {
+impl TCPClientInstanceHandle {
+    pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
 }
 
-impl StreamHandle for TCPClientHandle {
+impl StreamHandle for TCPClientInstanceHandle {
 
     async fn send(&mut self, packet: AnyPacket) {
         if self.sender.send(ClientContextInstruction::AnyPacket(packet)).await.is_err() {
@@ -46,14 +46,14 @@ struct TCPClientContext {
     write_half: OwnedWriteHalf,
     receiver: Receiver<ClientContextInstruction>,
     encryption_state: EncryptionState,
-    client_handle: TCPClientHandle,
-    lobby_manager: LobbyManagerHandle<TCPClientHandle>,
+    client_handle: TCPClientInstanceHandle,
+    lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
 }
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientHandle>) -> TCPClientHandle {
+    pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
-        let client_handle = TCPClientHandle { sender, id, counter: 0 };
+        let client_handle = TCPClientInstanceHandle { sender, id, counter: 0 };
 
         let (read_half, write_half) = stream.into_split();
 
@@ -76,17 +76,17 @@ impl TCPClientContext {
 
         tokio::select! {
             _callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle, &mut self.lobby_manager) => {
-                
+
             }
             _ = Self::handle_write_event(&mut self.write_half, &mut self.receiver) => {
-                println!("Close");
                 // channel closed (all ClientHandles dropped)
             }
         }
+        println!("Close");
         
     }
 
-    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
+    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         loop {
             read_buffer.reserve(MAX_TCP_LENGTH);

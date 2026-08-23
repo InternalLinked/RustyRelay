@@ -329,19 +329,21 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     // (`todo!()`) so the implementor is still forced to fill it in.
     let transport_functions = if is_tcp {
         quote::quote! {
-            async fn on_trigger_server_udp(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
-                ServerCallback::Pass
+            async fn on_trigger_server_udp(&self) {
+
             }
 
-            async fn on_trigger_client_udp(&self, server_instance: &mut ServerInstance) {}
+            async fn on_trigger_client_udp(&self) {}
         }
     } else {
         quote::quote! {
-            async fn on_trigger_server(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
+            async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
                 ServerCallback::Pass
             }
 
-            async fn on_trigger_client(&self, server_instance: &mut ServerInstance) {}
+            async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback {
+                ClientCallback::Pass
+            }
         }
     };
 

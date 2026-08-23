@@ -76,28 +76,3 @@ pub fn generate_auth_token() -> [u8; 16] {
         .expect("failed to get random bytes");
     token
 }
-
-pub struct ServerInstance {
-    pub(super) stream: TcpStream,
-    pub(crate) encryption: EncryptionState,
-}
-
-pub struct ServerHandle {
-    read_buffer: BytesMut,
-    pub(super) write_buffer: BytesMut,
-    pub(super) server_instance: ServerInstance,
-}
-
-impl ServerHandle {
-    pub fn get_server_instance(&mut self) -> &mut ServerInstance {
-        &mut self.server_instance
-    }
-
-    pub fn get_buffer_mut(&mut self) -> &mut BytesMut {
-        &mut self.read_buffer
-    }
-
-    pub fn get_buffer(&self) -> &BytesMut {
-        &self.read_buffer
-    }
-}

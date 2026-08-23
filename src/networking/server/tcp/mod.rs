@@ -5,12 +5,12 @@ use std::{net::SocketAddr};
 use dashmap::DashMap;
 use tokio::{net::TcpListener, runtime::Runtime};
 
-use crate::networking::server::{lobby_handler::{LobbyManager, LobbyManagerHandle}, tcp::tcp_client_handle::TCPClientHandle};
+use crate::networking::server::{lobby_handler::{LobbyManager, LobbyManagerHandle}, tcp::tcp_client_handle::TCPClientInstanceHandle};
 
 pub struct TCPServerCore {
     listener: TcpListener,
-    clients: DashMap<usize, TCPClientHandle>,
-    lobby_manager: LobbyManagerHandle<TCPClientHandle>,
+    clients: DashMap<usize, TCPClientInstanceHandle>,
+    lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
     next_id: usize,
 }
 
@@ -37,8 +37,7 @@ impl TCPServerCore {
 
             let (stream, address) = self.listener.accept().await?;
             println!("New connection from {}", address);
-            let client = TCPClientHandle::new(stream, self.next_id, self.lobby_manager.clone()).await;
-            self.clients.insert(self.next_id, client);
+            TCPClientInstanceHandle::new(stream, self.next_id, self.lobby_manager.clone()).await;
             self.next_id += 1;
 
         }

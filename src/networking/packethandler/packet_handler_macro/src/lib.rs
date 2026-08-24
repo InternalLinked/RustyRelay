@@ -6,9 +6,6 @@ use syn::{
     punctuated::Punctuated,
     Expr, Token, Type,
 };
- 
-
-
 
 struct DispatchInput {
     bytes: Expr,
@@ -50,7 +47,7 @@ pub fn dispatch_packet_impl(input: TokenStream) -> TokenStream {
  
                 let packet_total_size: usize = if <#packet>::DYNAMIC {
                     let dynamic_size: usize = {
-                        let cursor: usize = 9;
+                        let cursor: usize = 10;
                         usize::from_be_bytes(#bytes[cursor..cursor + 8].try_into().unwrap())
                     };
  

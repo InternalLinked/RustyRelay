@@ -12,7 +12,8 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 
 enum ClientContextInstruction {
     Close, 
-    AnyPacket(AnyPacket)
+    Packet(AnyPacket),
+    Awaitable(AnyPacket),
 }
 
 #[derive(Clone)]
@@ -23,9 +24,13 @@ pub struct TCPClientHandle {
 impl StreamHandle for TCPClientHandle {
 
     async fn send(&mut self, packet: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::AnyPacket(packet)).await.is_err() {
+        if self.sender.send(ClientContextInstruction::Packet(packet)).await.is_err() {
             todo!("Handle closed client");
         }
+    }
+
+    async fn send_awaitable(&mut self, packet: AnyPacket) -> AnyPacket {
+        AnyPacket::None
     }
 
     async fn close(&mut self) {
@@ -71,7 +76,7 @@ impl TCPClientHandle {
     }
 
     pub fn send(&mut self, packet: AnyPacket) -> io::Result<()> {
-        self.sender.blocking_send(ClientContextInstruction::AnyPacket(packet))
+        self.sender.blocking_send(ClientContextInstruction::Packet(packet))
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
@@ -157,8 +162,8 @@ impl TCPClientContext {
 
             if let Some(instruction) = receiver.recv().await {
                 match instruction {
-                    ClientContextInstruction::AnyPacket(mut packet) => {
-                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
+                    ClientContextInstruction::Packet(mut packet) => {
+                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer, 0).unwrap();
 
 
                         match dynamic {
@@ -175,6 +180,11 @@ impl TCPClientContext {
                             }
                         }
                     },
+
+                    ClientContextInstruction::Awaitable(mut packet) => {
+
+                    }
+
                     ClientContextInstruction::Close => {
                         return;
                     }
@@ -185,4 +195,5 @@ impl TCPClientContext {
         }
 
     }
+
 }

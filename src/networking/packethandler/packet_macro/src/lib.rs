@@ -149,6 +149,11 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
         prepend_field(&mut ast, quote::quote! { dynamic_size: u64 });
     }
     prepend_field(&mut ast, quote::quote! { nonce: u64 });
+    // `awaitable` is inserted last, so it lands first on the wire (ahead of
+    // `nonce`). It's a plain u8 flag: 0 = not awaitable, >0 = awaitable.
+    // Read-only from the outside except via `set_awaitable`, which is
+    // one-directional (see below).
+    prepend_field(&mut ast, quote::quote! { awaitable: u8 });
 
     let fields: syn::punctuated::Punctuated<syn::Field, syn::Token![,]> = match &ast.data {
         Data::Struct(data_struct) => match &data_struct.fields {
@@ -165,7 +170,7 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     // cheap to return by value, so those are left as-is.
     let readers = fields.iter().filter_map(|field| {
         let field_name = field.ident.as_ref().unwrap();
-        if field_name == "nonce" || field_name == "dynamic_size" {
+        if field_name == "nonce" || field_name == "dynamic_size" || field_name == "awaitable" {
             return None;
         }
 
@@ -202,14 +207,15 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     let field_names: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
 
     // `new()`'s parameter list: every field except `dynamic_size` (derived
-    // from the payload slice below rather than passed in separately) and
+    // from the payload slice below rather than passed in separately),
     // `nonce` (not settable at construction time -- it starts at 0 and can
-    // only be changed afterward via `set_nonce()`).
+    // only be changed afterward via `set_nonce()`), and `awaitable` (starts
+    // at 0, can only be flipped on afterward via `set_awaitable()`).
     let mut ctor_params: Vec<TokenStream2> = fields
         .iter()
         .filter(|f| {
             let name = f.ident.as_ref().unwrap();
-            !(is_dynamic && name == "dynamic_size") && name != "nonce"
+            !(is_dynamic && name == "dynamic_size") && name != "nonce" && name != "awaitable"
         })
         .map(|f| {
             let name = f.ident.as_ref().unwrap();
@@ -428,10 +434,13 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// Just fills in the fields -- no serialization happens here.
             /// Call `encode()` with a reusable buffer when you actually
             /// need the wire bytes. `nonce` is not a parameter: it starts
-            /// at 0 and must be set afterward via `set_nonce()`.
+            /// at 0 and must be set afterward via `set_nonce()`. Likewise
+            /// `awaitable` starts at 0 (not awaitable) and can only be
+            /// flipped on afterward via `set_awaitable()`.
             pub fn new(#(#ctor_params),*) -> Self {
                 #dynamic_size_from_payload
                 let nonce: u64 = 0;
+                let awaitable: u8 = 0;
 
                 #dynamic_buffer_new_init
 
@@ -444,6 +453,19 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             #(#readers)*
 
             #dynamic_buffer_getter
+
+            /// `true` once `set_awaitable()` has been called at least once.
+            pub fn is_awaitable(&self) -> bool {
+                self.awaitable > 0
+            }
+
+            /// One-directional: flips `awaitable` to `1`. There is no
+            /// corresponding "unset" -- once a packet is marked awaitable
+            /// it stays that way for its lifetime. Calling this again is a
+            /// harmless no-op.
+            pub fn set_awaitable(&mut self) {
+                self.awaitable = 1;
+            }
         }
     }
     .into()

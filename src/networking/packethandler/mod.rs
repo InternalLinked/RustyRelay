@@ -54,10 +54,13 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
                     match self {
                         $(
-                        AnyPacket::[<$packet Packet>](p) => p.encode(buf),
+                        AnyPacket::[<$packet Packet>](p) => {
+                            p.set_nonce(nonce);
+                            p.encode(buf)
+                        }, 
                         )*
                         _ => Err(std::io::ErrorKind::NotFound.into()),
                     }

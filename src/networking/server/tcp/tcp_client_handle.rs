@@ -30,6 +30,10 @@ impl StreamHandle for TCPClientInstanceHandle {
         }
     }
 
+    async fn send_awaitable(&mut self, packet: AnyPacket) -> AnyPacket {
+        AnyPacket::None
+    }
+
     async fn close(&mut self) {
         if self.sender.send(ClientContextInstruction::Close).await.is_err() {
             todo!("Handle closed client");
@@ -119,7 +123,7 @@ impl TCPClientContext {
             if let Some(instruction) = receiver.recv().await {
                 match instruction {
                     ClientContextInstruction::AnyPacket(mut packet) => {
-                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
+                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer, 0).unwrap();
 
 
                         match dynamic {

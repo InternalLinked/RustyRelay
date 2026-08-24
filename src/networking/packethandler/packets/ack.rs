@@ -26,7 +26,7 @@ impl Ack {
 
     pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback{
 
-        println!("Got ack back from server");
+        println!("Got ack back from server {}", self.get_nonce());
 
         ClientCallback::Pass
     }

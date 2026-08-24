@@ -13,8 +13,6 @@ impl Ack {
     pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         client_handle.counter += 1;
         
-        println!("got packet");
-
         let dynamic:Bytes = Bytes::copy_from_slice(b"test");
         let mut packet = Ack::new(0, dynamic);
 
@@ -23,24 +21,12 @@ impl Ack {
         if client_handle.counter >= 1000000 {
             println!("Worked!");
         }
-
-        if 0 != self.read_request() {
-            //println!("Message {}", str::from_utf8(self.get_dynamic().as_ref()).unwrap());
-            let dynamic:Bytes = Bytes::copy_from_slice(b"test");
-            let mut packet = Ack::new(0, dynamic);
-
-            let mut buffer = BytesMut::new();
-
-            packet.encode(&mut buffer);
-
-        }
         ServerCallback::Pass
     }
 
     pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback{
-        if 0 != self.read_request() {
-        } else {
-        }
+
+        println!("Got ack back from server");
 
         ClientCallback::Pass
     }

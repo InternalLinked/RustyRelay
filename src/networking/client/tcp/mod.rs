@@ -119,10 +119,9 @@ impl TCPClientContext {
             }
             _ = Self::handle_write_event(&mut self.write_half, &mut self.receiver) => {
                 // channel closed (all ClientHandles dropped)
-                println!("channel")
             }
         }
-        println!("Close");
+        println!("[tcp_client] Close");
         
     }
 

@@ -15,20 +15,23 @@ fn main() {
 
     //let d = test::bla(12);
 
-    thread::spawn(move || {
-        TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
-    });
+
+    TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
+
     
 
     let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
 
     let dna = Bytes::copy_from_slice(b"test");
 
-    let pkg = Ack::new(1, dna);
 
-    handle.send(AnyPacket::AckPacket(pkg)).unwrap();
+    for x in 0..10 {
+        let pkg = Ack::new(1, dna.clone());
 
+        handle.send(AnyPacket::AckPacket(pkg)).unwrap();
+    }
 
+    
 
     loop {
         

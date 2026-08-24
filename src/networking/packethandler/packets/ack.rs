@@ -12,7 +12,9 @@ pub struct Ack {
 impl Ack {
     pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         client_handle.counter += 1;
- 
+        
+        println!("got packet");
+
         let dynamic:Bytes = Bytes::copy_from_slice(b"test");
         let mut packet = Ack::new(0, dynamic);
 

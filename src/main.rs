@@ -24,18 +24,11 @@ fn main() {
 
     let dna = Bytes::copy_from_slice(b"test");
 
+    let pkg = Ack::new(1, dna);
 
-    let rt = Runtime::new().unwrap();
+    handle.send(AnyPacket::AckPacket(pkg)).unwrap();
 
-    rt.block_on(async move {
 
-        let packet = Ack::new(1, dna);
-        let p = AnyPacket::AckPacket(packet);
-        handle.send(p).await;
-
-     }
-        
-    );
 
     loop {
         

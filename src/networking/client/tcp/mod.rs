@@ -7,7 +7,7 @@ use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::packethandler::TCPClientPacketHandler;
-use crate::util::ClientCallback;
+use crate::util::{ClientCallback, client_runtime};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
 
 enum ClientContextInstruction {
@@ -19,41 +19,18 @@ enum ClientContextInstruction {
 pub struct TCPClientHandle {
     sender: Sender<ClientContextInstruction>
 }
-impl TCPClientHandle {
-    pub fn new(address: SocketAddr) -> io::Result<TCPClientHandle> {
-        let (sender, receiver) = oneshot::channel::<io::Result<TCPClientHandle>>();
-
-        thread::spawn(move || {
-            let rt = Runtime::new().unwrap();
-
-            rt.block_on(async move {
-                let result = async {
-                    let stream = TcpStream::connect(address).await?;
-                    let handle = TCPClientContext::instantiate(stream).await;
-                    Ok(handle)
-                }.await;
-
-                let _ = sender.send(result);
-            });
-        });
-
-        receiver
-            .blocking_recv()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
-    }
-}
 
 impl StreamHandle for TCPClientHandle {
 
     async fn send(&mut self, packet: AnyPacket) {
         if self.sender.send(ClientContextInstruction::AnyPacket(packet)).await.is_err() {
-            //todo!("Handle closed client");
+            todo!("Handle closed client");
         }
     }
 
     async fn close(&mut self) {
         if self.sender.send(ClientContextInstruction::Close).await.is_err() {
-            //todo!("Handle closed client");
+            todo!("Handle closed client");
         }
     }
 
@@ -61,6 +38,49 @@ impl StreamHandle for TCPClientHandle {
         0
     }
 }
+
+impl TCPClientHandle {
+    pub fn new(address: SocketAddr) -> io::Result<TCPClientHandle> {
+        let (sender, receiver) = oneshot::channel::<io::Result<TCPClientHandle>>();
+
+
+
+        client_runtime().spawn(async move {
+        
+        
+            match TcpStream::connect(address).await {
+
+                Ok(stream) => {
+                    let handle = TCPClientContext::instantiate(stream).await;
+                    let _ = sender.send(Ok(handle));
+                },
+                Err(err) => {
+                    let _ = sender.send(Err(err));
+                }
+
+
+            }
+            
+
+        });
+        
+
+        receiver
+            .blocking_recv()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+    }
+
+    pub fn send(&mut self, packet: AnyPacket) -> io::Result<()> {
+        self.sender.blocking_send(ClientContextInstruction::AnyPacket(packet))
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn close(&mut self) -> io::Result<()>{
+        self.sender.blocking_send(ClientContextInstruction::Close).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+}
+
 
 struct TCPClientContext {
     read_half: OwnedReadHalf,

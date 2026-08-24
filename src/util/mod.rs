@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::OnceLock};
 use bytes::{BufMut, BytesMut};
 use rand::{RngExt, TryRng, rngs::SysRng};
 use snow::params::NoiseParams;
-use tokio::{io::{self, AsyncReadExt}, net::TcpStream};
+use tokio::{io::{self, AsyncReadExt}, net::TcpStream, runtime::Runtime};
 use version_macro::packed_version;
 
 use crate::networking::packethandler::{TCPServerPacketHandler, packet::MAX_TCP_LENGTH};
@@ -20,7 +20,18 @@ pub fn noise_params() -> &'static NoiseParams {
     })
 }
 
-pub mod fastarray;
+
+
+static SERVER_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static CLIENT_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+pub fn server_runtime() -> &'static Runtime {
+    SERVER_RUNTIME.get_or_init(|| Runtime::new().unwrap())
+}
+
+pub fn client_runtime() -> &'static Runtime {
+    CLIENT_RUNTIME.get_or_init(|| Runtime::new().unwrap())
+}
 
 pub fn packed_version_to_str(packed: u32) -> String {
     let major = (packed >> 20) & 0x3FF;

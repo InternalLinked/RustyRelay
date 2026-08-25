@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::thread;
 
 use bytes::{Buf, BytesMut};
+use slab::Slab;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
@@ -13,7 +14,7 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 enum ClientContextInstruction {
     Close, 
     Packet(AnyPacket),
-    Awaitable(AnyPacket),
+    Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
 }
 
 #[derive(Clone)]
@@ -93,6 +94,7 @@ struct TCPClientContext {
     receiver: Receiver<ClientContextInstruction>,
     encryption_state: EncryptionState,
     client_handle: TCPClientHandle,
+    awaitable_cache: Slab<oneshot::Sender<AnyPacket>>
 }
 
 impl TCPClientContext {
@@ -108,6 +110,7 @@ impl TCPClientContext {
             receiver,
             encryption_state: EncryptionState::Unsecure,
             client_handle: client_handle.clone(),
+            awaitable_cache: Slab::new(),
         };
 
         tokio::spawn(async move {
@@ -117,83 +120,93 @@ impl TCPClientContext {
     }
 
     pub async fn run(&mut self) {
+        let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
+        let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
-        tokio::select! {
-            _callback = Self::handle_packet_event(&mut self.read_half, &mut self.client_handle) => {
+        loop {
+             tokio::select! {
+                callback = Self::read_buffer(&mut self.read_half, &mut read_buffer) => {
 
-            }
-            _ = Self::handle_write_event(&mut self.write_half, &mut self.receiver) => {
-                // channel closed (all ClientHandles dropped)
+                    match callback {
+                        Ok(0) => break,
+                        Ok(_n) => {
+                            // parse packets out of read_buffer here
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) => {
+                            println!("Client error {e}");
+                            break;
+                        },
+                    }
+
+                    
+                    TCPClientPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut self.awaitable_cache).await;
+
+
+                }
+                instruction = self.receiver.recv() => {
+
+                    let Some(instruction) = instruction else {
+                        break;
+                    };
+
+                    match instruction {
+                        ClientContextInstruction::Packet(mut packet) => {
+                            let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
+
+
+                            match dynamic {
+                                Some(payload) => {
+                                    let mut combined = fixed.chain(payload);
+                                    if self.write_half.write_all_buf(&mut combined).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                None => {
+                                    if self.write_half.write_all_buf(&mut fixed).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        },
+
+                        ClientContextInstruction::Awaitable {mut anypacket, sender} => {
+
+                            let key = self.awaitable_cache.insert(sender);
+
+                            let (mut fixed, dynamic) = anypacket.encode_awaitable(&mut write_buffer, key as u64).unwrap();
+                            
+                            match dynamic {
+                                Some(payload) => {
+                                    let mut combined = fixed.chain(payload);
+                                    if self.write_half.write_all_buf(&mut combined).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                None => {
+                                    if self.write_half.write_all_buf(&mut fixed).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+
+                        }
+
+                        ClientContextInstruction::Close => {
+                            return;
+                        }
+                    }
+                }
             }
         }
+
         println!("[tcp_client] Close");
         
     }
 
-    async fn handle_packet_event(read_half: &mut OwnedReadHalf, client_handle: &mut TCPClientHandle) -> ClientCallback {
-        let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        loop {
-            read_buffer.reserve(MAX_TCP_LENGTH);
-
-            match read_half.read_buf(&mut read_buffer).await {
-                Ok(0) => return ClientCallback::Kill,
-                Ok(_n) => {
-                    // parse packets out of read_buffer here
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return ClientCallback::Error(e),
-            }
-
-            match TCPClientPacketHandler::handle_packet(&mut read_buffer, client_handle).await {
-                 ClientCallback::Pass => continue,
-                 other => return other,
-            }
-        }
+    async fn read_buffer(read_half: &mut OwnedReadHalf, buffer: &mut BytesMut) -> Result<usize, std::io::Error> {
+        buffer.reserve(MAX_TCP_LENGTH);
+        read_half.read_buf(buffer).await
     }
-
-
-    async fn handle_write_event(
-        write_half: &mut OwnedWriteHalf,
-        receiver: &mut Receiver<ClientContextInstruction>,
-    ) {
-        let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-
-        loop {
-
-            if let Some(instruction) = receiver.recv().await {
-                match instruction {
-                    ClientContextInstruction::Packet(mut packet) => {
-                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer, 0).unwrap();
-
-
-                        match dynamic {
-                            Some(payload) => {
-                                let mut combined = fixed.chain(payload);
-                                if write_half.write_all_buf(&mut combined).await.is_err() {
-                                    break;
-                                }
-                            }
-                            None => {
-                                if write_half.write_all_buf(&mut fixed).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    },
-
-                    ClientContextInstruction::Awaitable(mut packet) => {
-
-                    }
-
-                    ClientContextInstruction::Close => {
-                        return;
-                    }
-                }
-
-            }
-
-        }
-
-    }
-
+    
 }

@@ -10,6 +10,8 @@ use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceHandle};
 use crate::util::{ClientCallback, ServerCallback};
 use bytes::{Bytes, BytesMut};
+use slab::Slab;
+use tokio::sync::oneshot;
 use crate::networking::packethandler::packet::Packet;
 use packet_handler_macro::{dispatch_packet_impl
 };
@@ -54,10 +56,20 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub fn encode(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)> {
+                    match self {
+                        $(
+                        AnyPacket::[<$packet Packet>](p) => p.encode(buf), 
+                        )*
+                        _ => Err(std::io::ErrorKind::NotFound.into()),
+                    }
+                }
+
+                pub fn encode_awaitable(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
                     match self {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
+                            p.set_awaitable();
                             p.set_nonce(nonce);
                             p.encode(buf)
                         }, 
@@ -86,7 +98,7 @@ pub struct TCPClientPacketHandler;
 
 impl TCPClientPacketHandler {
     
-pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle) -> ClientCallback{
+pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
         
         loop {
             match dispatch_packet(bytes) {

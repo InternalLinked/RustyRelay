@@ -123,7 +123,7 @@ impl TCPClientContext {
             if let Some(instruction) = receiver.recv().await {
                 match instruction {
                     ClientContextInstruction::AnyPacket(mut packet) => {
-                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer, 0).unwrap();
+                        let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
 
 
                         match dynamic {

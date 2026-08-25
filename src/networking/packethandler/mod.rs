@@ -8,6 +8,7 @@ use crate::networking::packethandler::packet::DynamicPacket;
 use crate::networking::packethandler::packets::ack::Ack;
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::handshake_packets::{HandshakeAck, HandshakeHello};
+use crate::networking::packethandler::packets::securebatch::SecureBatch;
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceHandle};
 use crate::util::{ClientCallback, EncryptionState, ServerCallback};
@@ -135,6 +136,7 @@ register_packets!(
     RelayError,
     HandshakeHello,
     HandshakeAck,
+    SecureBatch
 );
 
 

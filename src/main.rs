@@ -1,6 +1,6 @@
 use std::thread;
 
-use crate::{networking::packethandler::{AnyPacket, packets::{ack::Ack, handshake_packets::{HandshakeAck, HandshakeHello}}}, util::{RELAY_VERSION_BYTES, noise_params}};
+use crate::{networking::packethandler::{AnyPacket::{self, SecureBatchPacket}, packets::{ack::Ack, handshake_packets::{HandshakeAck, HandshakeHello}, securebatch::SecureBatch}}, util::{RELAY_VERSION_BYTES, noise_params}};
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -52,12 +52,23 @@ fn main() {
 
             let mut msg3 = [0u8; 255];
             let len = initiator.write_message(&[], &mut msg3).unwrap();
-            let initiator_transport = initiator.into_transport_mode().unwrap();
+            let mut initiator_transport = initiator.into_transport_mode().unwrap();
 
             let response = HandshakeAck::new(Bytes::copy_from_slice(&msg3[..len]));
 
             handle.blocking_send(AnyPacket::HandshakeAckPacket(response)).unwrap();
-            
+
+            let mut buffer = BytesMut::with_capacity(65_535);
+            buffer.resize(65_535, 0);
+
+            let len = initiator_transport.write_message(
+                b"secret message",
+                &mut buffer,
+            ).unwrap();
+
+            let encrypted_packet = SecureBatch::new(buffer.split_to(len).freeze());
+
+            handle.blocking_send(SecureBatchPacket(encrypted_packet)).unwrap();
 
         },
         AnyPacket::RelayErrorPacket(packet) => {

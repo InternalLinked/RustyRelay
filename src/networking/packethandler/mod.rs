@@ -6,9 +6,11 @@ use std::io::{self};
 use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::packethandler::packet::DynamicPacket;
 use crate::networking::packethandler::packets::ack::Ack;
+use crate::networking::packethandler::packets::error_packet::RelayError;
+use crate::networking::packethandler::packets::handshake_packets::{HandshakeAck, HandshakeHello};
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceHandle};
-use crate::util::{ClientCallback, ServerCallback};
+use crate::util::{ClientCallback, EncryptionState, ServerCallback};
 use bytes::{Bytes, BytesMut};
 use slab::Slab;
 use tokio::sync::oneshot;
@@ -38,7 +40,7 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub async fn on_trigger_server_tcp(&mut self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+                pub async fn on_trigger_server_tcp(&mut self, client_handle: &mut TCPClientInstanceHandle, encrypiton_state: &mut EncryptionState, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
                     let owned = std::mem::replace(self, AnyPacket::None);
                    
                     match owned {
@@ -55,7 +57,7 @@ macro_rules! register_packets {
                                 }
                             }
 
-                            p.on_trigger_server_tcp(client_handle, lobby_manager).await
+                            p.on_trigger_server_tcp(client_handle, encrypiton_state, lobby_manager).await
                         },
                         )*
                         _ => ServerCallback::Kill,
@@ -130,6 +132,9 @@ macro_rules! register_packets {
 
 register_packets!(
     Ack,
+    RelayError,
+    HandshakeHello,
+    HandshakeAck,
 );
 
 
@@ -163,14 +168,14 @@ pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHa
 pub struct TCPServerPacketHandler;
 
 impl TCPServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
 
         loop {
 
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
-                mut other => { other.on_trigger_server_tcp(client_handle, lobby_manager, awaitable_cache).await;}
+                mut other => { other.on_trigger_server_tcp(client_handle,  encryption_state, lobby_manager, awaitable_cache).await;}
 
             }
         }

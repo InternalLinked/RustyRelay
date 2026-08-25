@@ -345,7 +345,7 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     } else {
         quote::quote! {
-            async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientHandle, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
+            async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientHandle, encryption_state: &mut EncryptionState, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
                 ServerCallback::Pass
             }
 

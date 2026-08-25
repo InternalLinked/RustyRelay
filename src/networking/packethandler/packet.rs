@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::{Bytes, BytesMut};
 
-use crate::{networking::{client::tcp::TCPClientHandle, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::TCPClientHandle, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionState, ServerCallback}};
 
 pub static MAX_TCP_LENGTH: usize = 4096;
 pub static MAX_UDP_LENGTH: usize = 512;
@@ -18,7 +18,7 @@ pub trait Packet: Send + Sync {
     fn get_size(&self) -> usize;
 
     /* This is the code that gets triggered if the server recieves the packet*/
-    async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, manager_handler: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState, manager_handler: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
     }

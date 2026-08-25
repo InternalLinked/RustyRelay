@@ -1,9 +1,13 @@
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use slab::Slab;
+use snow::Builder;
 use tokio::io::AsyncWriteExt;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::util::ClientContextInstruction;
+use crate::networking::packethandler::packets::error_packet::RelayError;
+use crate::networking::packethandler::packets::handshake_packets::HandshakeAck;
+use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
+use crate::util::EncryptionState::{Handshake, Unsecure};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
 #[derive(Clone)]
@@ -17,6 +21,7 @@ impl TCPClientInstanceHandle {
     pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
+
 }
 
 impl StreamHandle for TCPClientInstanceHandle {
@@ -52,7 +57,6 @@ struct TCPClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
     receiver: Receiver<ClientContextInstruction>,
-    encryption_state: EncryptionState,
     client_handle: TCPClientInstanceHandle,
     lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>
@@ -69,7 +73,6 @@ impl TCPClientContext {
             read_half,
             write_half,
             receiver,
-            encryption_state: EncryptionState::Unsecure,
             client_handle: client_handle.clone(),
             lobby_manager,
             awaitable_cache: Slab::new(),
@@ -77,12 +80,19 @@ impl TCPClientContext {
 
         tokio::spawn(async move {
             context.run().await;
+            let t = EncryptionState::Unsecure;
+            match t {
+                Unsecure => print!("!"),
+                _ => {}
+            }
         });
         client_handle
     }
 
     pub async fn run(&mut self) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
+
+        let mut encrypiton_state = EncryptionState::Unsecure;
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
@@ -103,11 +113,7 @@ impl TCPClientContext {
                         },
                     }
 
-
-                    
-                    
-                    TCPServerPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut self.lobby_manager, &mut self.awaitable_cache).await;
-
+                    TCPServerPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut encrypiton_state, &mut self.lobby_manager, &mut self.awaitable_cache).await;
 
                 }
                 instruction = self.receiver.recv() => {
@@ -118,6 +124,7 @@ impl TCPClientContext {
 
                     match instruction {
                         ClientContextInstruction::Packet(mut packet) => {
+                            
                             let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
 
 
@@ -137,7 +144,6 @@ impl TCPClientContext {
                         },
 
                         ClientContextInstruction::Awaitable {mut anypacket, sender} => {
-                            println!("server send awaitable");
                             let key = self.awaitable_cache.insert(sender);
 
                             println!("sending with key {}", key);

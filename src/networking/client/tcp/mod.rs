@@ -81,7 +81,7 @@ impl TCPClientHandle {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    pub fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
+    pub fn blocking_send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
         let (sender, r) = oneshot::channel::<AnyPacket>();
 
 

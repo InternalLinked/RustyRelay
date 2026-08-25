@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packet::{AwaitablePacket, Packet}}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::TCPClientHandle, packethandler::packet::Packet, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionState, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -10,7 +10,7 @@ pub struct Ack {
 }
 
 impl Ack {
-    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         
         client_handle.counter += 1;
 
@@ -18,35 +18,12 @@ impl Ack {
             println!("Worked!");
         }
 
-        println!(",");
-
-        let mut client_handle = client_handle.clone();
-        tokio::spawn(async move  {
-            let dynamic:Bytes = Bytes::copy_from_slice(b"test");
-            let packet = Ack::new(12, dynamic);
-            match client_handle.send_awaitable(AnyPacket::AckPacket(packet)).await.unwrap() {
-                AnyPacket::AckPacket(packet) => {
-                    println!("Got packet back server {} ", packet.read_request());
-                }
-                _ => println!("got anything"),
-            }
-        });
-
-
-        println!("done");
-
         ServerCallback::Pass
     }
 
     pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback{
 
         println!("Got ack back from server {}", self.get_nonce());
-        let dynamic:Bytes = Bytes::copy_from_slice(b"test");
-        let mut packet = Ack::new(14, dynamic);
-
-        packet.set_awaitable_server();
-        packet.set_nonce(self.get_nonce());
-        client_handle.send(AnyPacket::AckPacket(packet)).await;
         
         ClientCallback::Pass
     }

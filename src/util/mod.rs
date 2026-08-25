@@ -2,11 +2,11 @@ use std::{net::SocketAddr, sync::OnceLock};
 
 use bytes::{BufMut, BytesMut};
 use rand::{RngExt, TryRng, rngs::SysRng};
-use snow::params::NoiseParams;
+use snow::{HandshakeState, TransportState, params::NoiseParams};
 use tokio::{io::{self, AsyncReadExt}, net::TcpStream, runtime::Runtime, sync::oneshot};
 use version_macro::packed_version;
 
-use crate::networking::packethandler::{AnyPacket, TCPServerPacketHandler, packet::MAX_TCP_LENGTH};
+use crate::networking::packethandler::{AnyPacket, TCPServerPacketHandler, packet::MAX_TCP_LENGTH, packets::handshake_packets::HandshakeHello};
 
 pub const RELAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELAY_VERSION_BYTES: u32 = packed_version!();
@@ -39,6 +39,11 @@ pub fn packed_version_to_str(packed: u32) -> String {
     let patch = packed & 0x3FF;
 
     format!("{major}.{minor}.{patch}")
+}
+
+pub enum EncryptionTransport {
+    Handshake(HandshakeState),
+    Transport(TransportState)
 }
 
 pub enum EncryptionState {

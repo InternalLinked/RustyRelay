@@ -40,6 +40,14 @@ pub trait Packet: Send + Sync {
         todo!("Litte note that you forgot to implement on_trigger_client for a packet :)");
     }
 
+    fn set_awaitable_client(&mut self);
+
+    fn set_awaitable_server(&mut self);
+
+    fn is_awaitable_client(&self) -> bool;
+
+    fn is_awaitable_server(&self) -> bool;
+
     fn get_nonce(&self) -> u64;
 
     fn set_nonce(&mut self, nonce: u64);

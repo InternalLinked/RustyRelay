@@ -38,10 +38,25 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-                    match self {
+                pub async fn on_trigger_server_tcp(&mut self, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+                    let owned = std::mem::replace(self, AnyPacket::None);
+                   
+                    match owned {
                         $(
-                        AnyPacket::[<$packet Packet>](p) => p.on_trigger_server_tcp(client_handle, lobby_manager).await,
+                        AnyPacket::[<$packet Packet>](p) => {
+                            if p.is_awaitable_server() {
+                                println!("Is awaitable_server");
+                                if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
+
+                                    let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
+                                    return ServerCallback::Pass;
+                                }else {
+                                    return ServerCallback::Kill;
+                                }
+                            }
+
+                            p.on_trigger_server_tcp(client_handle, lobby_manager).await
+                        },
                         )*
                         _ => ServerCallback::Kill,
                     }
@@ -54,7 +69,7 @@ macro_rules! register_packets {
                     match owned {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
-                            if p.is_awaitable() {
+                            if p.is_awaitable_client() {
                                 if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
                                     return ClientCallback::Pass;
@@ -78,11 +93,24 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub fn encode_awaitable(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode_awaitable_client(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
                     match self {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
-                            p.set_awaitable();
+                            p.set_awaitable_client();
+                            p.set_nonce(nonce);
+                            p.encode(buf)
+                        }, 
+                        )*
+                        _ => Err(std::io::ErrorKind::NotFound.into()),
+                    }
+                }
+
+                pub fn encode_awaitable_server(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
+                    match self {
+                        $(
+                        AnyPacket::[<$packet Packet>](p) => {
+                            p.set_awaitable_server();
                             p.set_nonce(nonce);
                             p.encode(buf)
                         }, 
@@ -135,13 +163,14 @@ pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHa
 pub struct TCPServerPacketHandler;
 
 impl TCPServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-        
+    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientInstanceHandle, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+
         loop {
+
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
-                other => { other.on_trigger_server_tcp(client_handle, lobby_manager).await;}
+                mut other => { other.on_trigger_server_tcp(client_handle, lobby_manager, awaitable_cache).await;}
 
             }
         }

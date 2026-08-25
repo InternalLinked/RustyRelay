@@ -8,14 +8,8 @@ use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::packethandler::TCPClientPacketHandler;
-use crate::util::{ClientCallback, client_runtime};
+use crate::util::{ClientCallback, ClientContextInstruction, client_runtime};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
-
-enum ClientContextInstruction {
-    Close, 
-    Packet(AnyPacket),
-    Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
-}
 
 #[derive(Clone)]
 pub struct TCPClientHandle {
@@ -82,7 +76,7 @@ impl TCPClientHandle {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
     }
 
-    pub fn send(&mut self, packet: AnyPacket) -> io::Result<()> {
+    pub fn blocking_send(&mut self, packet: AnyPacket) -> io::Result<()> {
         self.sender.blocking_send(ClientContextInstruction::Packet(packet))
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
@@ -136,6 +130,8 @@ impl TCPClientContext {
     }
 
     pub async fn run(&mut self) {
+        /* Really ugly code here but rusts burrowchecker forces me to do this */
+
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
@@ -190,10 +186,9 @@ impl TCPClientContext {
                         },
 
                         ClientContextInstruction::Awaitable {mut anypacket, sender} => {
-
                             let key = self.awaitable_cache.insert(sender);
 
-                            let (mut fixed, dynamic) = anypacket.encode_awaitable(&mut write_buffer, key as u64).unwrap();
+                            let (mut fixed, dynamic) = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
                             
                             match dynamic {
                                 Some(payload) => {

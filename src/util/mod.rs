@@ -3,10 +3,10 @@ use std::{net::SocketAddr, sync::OnceLock};
 use bytes::{BufMut, BytesMut};
 use rand::{RngExt, TryRng, rngs::SysRng};
 use snow::params::NoiseParams;
-use tokio::{io::{self, AsyncReadExt}, net::TcpStream, runtime::Runtime};
+use tokio::{io::{self, AsyncReadExt}, net::TcpStream, runtime::Runtime, sync::oneshot};
 use version_macro::packed_version;
 
-use crate::networking::packethandler::{TCPServerPacketHandler, packet::MAX_TCP_LENGTH};
+use crate::networking::packethandler::{AnyPacket, TCPServerPacketHandler, packet::MAX_TCP_LENGTH};
 
 pub const RELAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELAY_VERSION_BYTES: u32 = packed_version!();
@@ -67,6 +67,12 @@ pub enum ClientCallback {
     /* Pass: Instruct the server to do nothing */
     Pass,
     Error(std::io::Error),
+}
+
+pub enum ClientContextInstruction {
+    Close, 
+    Packet(AnyPacket),
+    Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
 }
 
 pub fn random_string() -> String {

@@ -150,9 +150,10 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     prepend_field(&mut ast, quote::quote! { nonce: u64 });
     // `awaitable` is inserted last, so it lands first on the wire (ahead of
-    // `nonce`). It's a plain u8 flag: 0 = not awaitable, >0 = awaitable.
-    // Read-only from the outside except via `set_awaitable`, which is
-    // one-directional (see below).
+    // `nonce`). It's a plain u8 flag: 0 = not awaitable, 1 = awaitable on
+    // the client, 2 = awaitable on the server. Read-only from the outside
+    // except via `set_awaitable_client`/`set_awaitable_server`, which are
+    // one-directional.
     prepend_field(&mut ast, quote::quote! { awaitable: u8 });
 
     let fields: syn::punctuated::Punctuated<syn::Field, syn::Token![,]> = match &ast.data {
@@ -210,7 +211,8 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     // from the payload slice below rather than passed in separately),
     // `nonce` (not settable at construction time -- it starts at 0 and can
     // only be changed afterward via `set_nonce()`), and `awaitable` (starts
-    // at 0, can only be flipped on afterward via `set_awaitable()`).
+    // at 0, can only be set afterward via `set_awaitable_client()` /
+    // `set_awaitable_server()`).
     let mut ctor_params: Vec<TokenStream2> = fields
         .iter()
         .filter(|f| {
@@ -404,6 +406,28 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
                 self.nonce = nonce;
             }
 
+            // `awaitable` is a single synthetic u8: 0 = not awaitable,
+            // 1 = awaitable on the client side, 2 = awaitable on the
+            // server side. The two `set_*` methods are one-directional
+            // (no unsetter) and mutually exclusive -- calling one after
+            // the other overwrites the previous value rather than
+            // combining them, since a packet only ever awaits on one side.
+            fn set_awaitable_client(&mut self) {
+                self.awaitable = 1;
+            }
+
+            fn set_awaitable_server(&mut self) {
+                self.awaitable = 2;
+            }
+
+            fn is_awaitable_client(&self) -> bool {
+                self.awaitable == 1
+            }
+
+            fn is_awaitable_server(&self) -> bool {
+                self.awaitable == 2
+            }
+
             #transport_functions
         }
 
@@ -435,8 +459,9 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// Call `encode()` with a reusable buffer when you actually
             /// need the wire bytes. `nonce` is not a parameter: it starts
             /// at 0 and must be set afterward via `set_nonce()`. Likewise
-            /// `awaitable` starts at 0 (not awaitable) and can only be
-            /// flipped on afterward via `set_awaitable()`.
+            /// `awaitable` starts at 0 (neither client- nor
+            /// server-awaitable) and can only be set afterward via
+            /// `set_awaitable_client()` / `set_awaitable_server()`.
             pub fn new(#(#ctor_params),*) -> Self {
                 #dynamic_size_from_payload
                 let nonce: u64 = 0;
@@ -453,19 +478,6 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             #(#readers)*
 
             #dynamic_buffer_getter
-
-            /// `true` once `set_awaitable()` has been called at least once.
-            pub fn is_awaitable(&self) -> bool {
-                self.awaitable > 0
-            }
-
-            /// One-directional: flips `awaitable` to `1`. There is no
-            /// corresponding "unset" -- once a packet is marked awaitable
-            /// it stays that way for its lifetime. Calling this again is a
-            /// harmless no-op.
-            pub fn set_awaitable(&mut self) {
-                self.awaitable = 1;
-            }
         }
     }
     .into()

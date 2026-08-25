@@ -14,7 +14,9 @@ impl Ack {
         client_handle.counter += 1;
         
         let dynamic:Bytes = Bytes::copy_from_slice(b"test");
-        let mut packet = Ack::new(0, dynamic);
+        let mut packet = Ack::new(12, dynamic);
+        packet.set_awaitable();
+        packet.set_nonce(self.get_nonce());
 
         client_handle.send(AnyPacket::AckPacket(packet)).await;
 

@@ -25,13 +25,17 @@ fn main() {
     let dna = Bytes::copy_from_slice(b"test");
 
 
-    for x in 0..10 {
-        let pkg = Ack::new(1, dna.clone());
+    let pkg = Ack::new(1, dna.clone());
 
 
-        handle.send(AnyPacket::AckPacket(pkg)).unwrap();
+    let result = handle.send_awaitable(AnyPacket::AckPacket(pkg)).unwrap();
+
+    match result {
+        AnyPacket::AckPacket(packet) => {
+            println!("Test: {}", packet.read_request());
+        },
+        _ => ()
     }
-
     
 
     loop {

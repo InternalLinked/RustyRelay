@@ -30,8 +30,14 @@ impl StreamHandle for TCPClientHandle {
         }
     }
 
-    async fn send_awaitable(&mut self, packet: AnyPacket) -> AnyPacket {
-        AnyPacket::None
+    async fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
+        let (sender, r) = oneshot::channel::<AnyPacket>();
+
+
+        if self.sender.send(ClientContextInstruction::Awaitable{anypacket, sender}).await.is_err() {
+            todo!("Handle closed client");
+        }
+        r.await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
     async fn close(&mut self) {
@@ -81,6 +87,16 @@ impl TCPClientHandle {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
+    pub fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
+        let (sender, r) = oneshot::channel::<AnyPacket>();
+
+
+        if self.sender.blocking_send(ClientContextInstruction::Awaitable{anypacket, sender}).is_err() {
+            todo!("Handle closed client");
+        }
+        r.blocking_recv().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
     pub fn close(&mut self) -> io::Result<()>{
         self.sender.blocking_send(ClientContextInstruction::Close).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
@@ -123,6 +139,7 @@ impl TCPClientContext {
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
+
         loop {
              tokio::select! {
                 callback = Self::read_buffer(&mut self.read_half, &mut read_buffer) => {
@@ -139,6 +156,8 @@ impl TCPClientContext {
                         },
                     }
 
+
+                    
                     
                     TCPClientPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut self.awaitable_cache).await;
 

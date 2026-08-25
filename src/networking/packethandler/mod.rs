@@ -47,10 +47,23 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback {
-                    match self {
+                pub async fn on_trigger_client_tcp(&mut self, client_handle: &mut TCPClientHandle, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback {
+
+                    let owned = std::mem::replace(self, AnyPacket::None);
+
+                    match owned {
                         $(
-                        AnyPacket::[<$packet Packet>](p) => p.on_trigger_client_tcp(client_handle).await,
+                        AnyPacket::[<$packet Packet>](p) => {
+                            if p.is_awaitable() {
+                                if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
+                                    let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
+                                    return ClientCallback::Pass;
+                                }else {
+                                    return ClientCallback::Kill;
+                                }
+                            }
+                            p.on_trigger_client_tcp(client_handle).await
+                        },
                         )*
                         _ => ClientCallback::Kill,
                     }
@@ -104,7 +117,13 @@ pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHa
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ClientCallback::Kill,
                 AnyPacket::None => return ClientCallback::Pass,
-                other => { other.on_trigger_client_tcp(client_handle).await;}
+                mut other => { 
+                    match other.on_trigger_client_tcp(client_handle, awaitable_cache).await {
+                        ClientCallback::Pass => (),
+                        other => return other,
+
+                    }
+                }
 
             }
         }

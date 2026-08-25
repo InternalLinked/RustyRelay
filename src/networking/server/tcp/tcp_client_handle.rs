@@ -30,8 +30,8 @@ impl StreamHandle for TCPClientInstanceHandle {
         }
     }
 
-    async fn send_awaitable(&mut self, packet: AnyPacket) -> AnyPacket {
-        AnyPacket::None
+    async fn send_awaitable(&mut self, packet: AnyPacket) -> io::Result<AnyPacket> {
+        Ok(AnyPacket::None)
     }
 
     async fn close(&mut self) {

@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::OnceLock};
 
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use rand::{RngExt, TryRng, rngs::SysRng};
 use snow::{HandshakeState, TransportState, params::NoiseParams};
 use tokio::{io::{self, AsyncReadExt}, net::TcpStream, runtime::Runtime, sync::oneshot};
@@ -39,6 +39,25 @@ pub fn packed_version_to_str(packed: u32) -> String {
     let patch = packed & 0x3FF;
 
     format!("{major}.{minor}.{patch}")
+}
+
+use std::fmt;
+
+#[derive(Debug)]
+pub enum EncryptionError {
+    DecryptionFailed,
+    InvalidState,
+    BufferTooSmall,
+}
+
+impl fmt::Display for EncryptionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EncryptionError::DecryptionFailed => write!(f, "failed to decrypt message"),
+            EncryptionError::InvalidState => write!(f, "invalid encryption state"),
+            EncryptionError::BufferTooSmall => write!(f, "encryption buffer is too small"),
+        }
+    }
 }
 
 pub enum EncryptionTransport {
@@ -97,4 +116,49 @@ pub fn generate_auth_token() -> [u8; 16] {
         .try_fill_bytes(&mut token)
         .expect("failed to get random bytes");
     token
+}
+
+
+pub struct EncryptionHandler {
+    pub encryption_state: EncryptionState,
+    encryption_buffer: BytesMut
+}
+
+impl EncryptionHandler {
+
+    pub fn new() -> Self {
+
+        let buffer = BytesMut::zeroed(8096);
+        
+        EncryptionHandler { encryption_state: EncryptionState::Unsecure, encryption_buffer: buffer }
+
+    }
+
+
+    pub fn decrypt(&mut self, blob: &Bytes) -> Result<Bytes, EncryptionError> {
+        match &mut self.encryption_state {
+            EncryptionState::Encrypted(encrypt) => {
+                let len = encrypt.read_message(
+                        &blob[..blob.len()],
+                        &mut self.encryption_buffer[..],
+                    ).map_err(|_| EncryptionError::DecryptionFailed)?;
+
+                Ok(self.encryption_buffer.split_to(len).freeze())
+            }
+            _ => Err(EncryptionError::InvalidState),
+        }
+    }
+
+    pub fn encrypt(&mut self, msg: &Bytes) -> Result<Bytes, EncryptionError> {
+        match &mut self.encryption_state {
+            EncryptionState::Encrypted(encrypt) => {
+                
+                let len = encrypt.read_message(&msg[..msg.len()], &mut self.encryption_buffer).unwrap();
+
+                Ok(self.encryption_buffer.split_to(len).freeze())
+            }
+            _ => Err(EncryptionError::InvalidState),
+        }
+    }
+    
 }

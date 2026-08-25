@@ -40,10 +40,6 @@ fn main() {
     let authpkg = HandshakeHello::new(RELAY_VERSION_BYTES, Bytes::copy_from_slice(&encryption[..len]));
 
 
-
-
-    
-
     match handle.blocking_send_awaitable(AnyPacket::HandshakeHelloPacket(authpkg)).unwrap() {
         AnyPacket::HandshakeAckPacket(packet) => {
             let server_public_key = packet.get_dynamic();
@@ -60,7 +56,7 @@ fn main() {
 
             let mut buffer = BytesMut::with_capacity(65_535);
             buffer.resize(65_535, 0);
-
+            
             let len = initiator_transport.write_message(
                 b"secret message",
                 &mut buffer,
@@ -69,6 +65,7 @@ fn main() {
             let encrypted_packet = SecureBatch::new(buffer.split_to(len).freeze());
 
             handle.blocking_send(SecureBatchPacket(encrypted_packet)).unwrap();
+
 
         },
         AnyPacket::RelayErrorPacket(packet) => {

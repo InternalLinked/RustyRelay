@@ -1,11 +1,11 @@
-use crate::{networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packet::Packet, packets::error_packet::RelayError}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionState, EncryptionTransport, RELAY_VERSION_BYTES, ServerCallback, noise_params}};
+use crate::{networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packet::Packet, packets::error_packet::RelayError}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionHandler, EncryptionState, EncryptionTransport, RELAY_VERSION_BYTES, ServerCallback, noise_params}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use snow::Builder;
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-async fn handle_unsecure(packet: &HandshakeHello, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState) -> ServerCallback {
+async fn handle_unsecure(packet: &HandshakeHello, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler) -> ServerCallback {
 
     if packet.version != RELAY_VERSION_BYTES {
         let response = RelayError::new(2);
@@ -35,7 +35,7 @@ async fn handle_unsecure(packet: &HandshakeHello, client_handle: &mut TCPClientI
 
     let mut packet = HandshakeAck::new(Bytes::copy_from_slice(&server_public_key[..len]));
 
-    *encryption_state = EncryptionState::Handshake(responder);
+    encryption_handler.encryption_state = EncryptionState::Handshake(responder);
 
     packet.set_awaitable_client();
     packet.set_nonce(packet.get_nonce());
@@ -52,12 +52,12 @@ pub struct HandshakeHello {
 }
 
 impl HandshakeHello {
-    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         
-        match encryption_state {
+        match encryption_handler.encryption_state {
 
             EncryptionState::Unsecure => {
-                return handle_unsecure(self, client_handle, encryption_state).await;
+                return handle_unsecure(self, client_handle, encryption_handler).await;
             },
             _ => ()
 
@@ -80,16 +80,17 @@ pub struct HandshakeAck {
 }
 
 impl HandshakeAck {
-    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_state: &mut EncryptionState, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         
-        let old_state = std::mem::replace(encryption_state, EncryptionState::Unsecure);
+
+        let old_state = std::mem::replace(&mut encryption_handler.encryption_state, EncryptionState::Unsecure);
 
         if let EncryptionState::Handshake(mut handshake) = old_state {
             let mut scratch = [0u8; 1024];
             let msg3_from_client = self.get_dynamic().as_ref();
             match handshake.read_message(msg3_from_client, &mut scratch) {
                 Ok(_n) => {
-                     *encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().unwrap());
+                     encryption_handler.encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().unwrap());
                      println!("[Server] Encrypted.");
                 }
                 Err(e) => println!("{:?}", e),

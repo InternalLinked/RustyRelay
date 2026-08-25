@@ -1,12 +1,14 @@
+use std::io::Error;
+
 use bytes::{Buf, Bytes, BytesMut};
 use slab::Slab;
-use snow::Builder;
+use snow::{Builder, error};
 use tokio::io::AsyncWriteExt;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::handshake_packets::HandshakeAck;
-use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
+use crate::util::{ClientContextInstruction, EncryptionError, EncryptionHandler, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
 use crate::util::EncryptionState::{Handshake, Unsecure};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
@@ -53,6 +55,7 @@ impl StreamHandle for TCPClientInstanceHandle {
     }
 }
 
+
 struct TCPClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
@@ -92,7 +95,7 @@ impl TCPClientContext {
     pub async fn run(&mut self) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
-        let mut encrypiton_state = EncryptionState::Unsecure;
+        let mut encryption_handler = EncryptionHandler::new();
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
@@ -113,7 +116,7 @@ impl TCPClientContext {
                         },
                     }
 
-                    TCPServerPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut encrypiton_state, &mut self.lobby_manager, &mut self.awaitable_cache).await;
+                    TCPServerPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut encryption_handler, &mut self.lobby_manager, &mut self.awaitable_cache).await;
 
                 }
                 instruction = self.receiver.recv() => {

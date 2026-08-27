@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::{Bytes, BytesMut};
 
-use crate::{networking::{client::tcp::TCPClientHandle, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionHandler, EncryptionState, ServerCallback}};
+use crate::{networking::{client::tcp::TCPClientHandle, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, EncryptionHandler, EncryptionState, ServerCallback}};
 
 pub static MAX_TCP_LENGTH: usize = 4096;
 pub static MAX_UDP_LENGTH: usize = 512;
@@ -13,18 +13,18 @@ impl<T: Packet + Awaitable> AwaitablePacket for T {}
 pub trait Packet: Send + Sync {
     fn get_id(&self) -> u8;
 
-    fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)>;
+    fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes>;
 
     fn get_size(&self) -> usize;
 
     /* This is the code that gets triggered if the server recieves the packet*/
-    async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, manager_handler: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore,  manager_handler: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_server for a packet :)");
     }
 
     /* This is the code that gets triggered if the client recieves the packet*/
-    async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback {
+    async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler) -> ClientCallback {
         /*! Leave this here !*/
         todo!("Litte note that you forgot to implement on_trigger_client for a packet :)");
     }

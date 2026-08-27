@@ -1,4 +1,4 @@
-use std::thread;
+use std::{thread, time::Duration};
 
 use crate::{networking::packethandler::{AnyPacket::{self, SecureBatchPacket}, packets::{ack::Ack, handshake_packets::{HandshakeAck, HandshakeHello}, securebatch::SecureBatch}}, util::{RELAY_VERSION_BYTES, noise_params}};
 use bytes::{Bytes, BytesMut};
@@ -23,60 +23,13 @@ fn main() {
 
     let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
     
-    let params: NoiseParams = noise_params().clone();
+    let payload = Bytes::copy_from_slice(b"test");
 
-    let initiator_keys = Builder::new(params.clone()).generate_keypair().unwrap();
-
-    let mut initiator = Builder::new(params.clone())
-        .local_private_key(&initiator_keys.private)
-        .unwrap()
-        .build_initiator()
-        .unwrap();
-
-    let mut encryption = [0u8; 1024];
-
-    let len = initiator.write_message(&[], &mut encryption).unwrap();
-
-    let authpkg = HandshakeHello::new(RELAY_VERSION_BYTES, Bytes::copy_from_slice(&encryption[..len]));
-
-
-    match handle.blocking_send_awaitable(AnyPacket::HandshakeHelloPacket(authpkg)).unwrap() {
-        AnyPacket::HandshakeAckPacket(packet) => {
-            let server_public_key = packet.get_dynamic();
-            let mut buf = [0u8; 1024];
-            initiator.read_message(&server_public_key, &mut buf).unwrap(); 
-
-            let mut msg3 = [0u8; 255];
-            let len = initiator.write_message(&[], &mut msg3).unwrap();
-            let mut initiator_transport = initiator.into_transport_mode().unwrap();
-
-            let response = HandshakeAck::new(Bytes::copy_from_slice(&msg3[..len]));
-
-            handle.blocking_send(AnyPacket::HandshakeAckPacket(response)).unwrap();
-
-            let mut buffer = BytesMut::with_capacity(65_535);
-            buffer.resize(65_535, 0);
-            
-            let len = initiator_transport.write_message(
-                b"secret message",
-                &mut buffer,
-            ).unwrap();
-
-            let encrypted_packet = SecureBatch::new(buffer.split_to(len).freeze());
-
-            handle.blocking_send(SecureBatchPacket(encrypted_packet)).unwrap();
-
-
-        },
-        AnyPacket::RelayErrorPacket(packet) => {
-            panic!("Error packet with errorcode: {}", packet.read_code());
-        }
-        _ => panic!("Unexpected"),
-    }
+    let pkg = Ack::new(12, payload);
+    thread::sleep(Duration::from_millis(1000));
+    handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
 
     println!("Done");
-
-    
 
     loop {
         

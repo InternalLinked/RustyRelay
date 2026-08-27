@@ -1,14 +1,18 @@
 use std::net::SocketAddr;
 use std::thread;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use slab::Slab;
+use snow::Builder;
+use snow::params::NoiseParams;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::packethandler::TCPClientPacketHandler;
-use crate::util::{ClientCallback, ClientContextInstruction, client_runtime};
+use crate::networking::packethandler::packets::handshake_packets::HandshakeHello;
+use crate::networking::packethandler::packets::securebatch::SecureBatch;
+use crate::util::{ClientCallback, ClientContextInstruction, EncryptionHandler, RELAY_VERSION_BYTES, client_runtime, noise_params};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
 
 #[derive(Clone)]
@@ -18,12 +22,17 @@ pub struct TCPClientHandle {
 
 impl StreamHandle for TCPClientHandle {
 
-    async fn send(&mut self, packet: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::Packet(packet)).await.is_err() {
+    async fn send_unsecure(&mut self, anypacket: AnyPacket) {
+        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: false}).await.is_err() {
             todo!("Handle closed client");
         }
     }
 
+    async fn send(&mut self, anypacket: AnyPacket) {
+        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: true}).await.is_err() {
+            todo!("Handle closed client");
+        }
+    }
     async fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
         let (sender, r) = oneshot::channel::<AnyPacket>();
 
@@ -76,8 +85,8 @@ impl TCPClientHandle {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
     }
 
-    pub fn blocking_send(&mut self, packet: AnyPacket) -> io::Result<()> {
-        self.sender.blocking_send(ClientContextInstruction::Packet(packet))
+    pub fn blocking_send(&mut self, anypacket: AnyPacket) -> io::Result<()> {
+        self.sender.blocking_send(ClientContextInstruction::Packet {anypacket, encrypt: true})
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
@@ -102,7 +111,6 @@ struct TCPClientContext {
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
     receiver: Receiver<ClientContextInstruction>,
-    encryption_state: EncryptionState,
     client_handle: TCPClientHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>
 }
@@ -118,7 +126,6 @@ impl TCPClientContext {
             read_half,
             write_half,
             receiver,
-            encryption_state: EncryptionState::Unsecure,
             client_handle: client_handle.clone(),
             awaitable_cache: Slab::new(),
         };
@@ -135,6 +142,27 @@ impl TCPClientContext {
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
+        let mut encryption_handler = EncryptionHandler::new();
+
+        let params: NoiseParams = noise_params().clone();
+
+        let initiator_keys = Builder::new(params.clone()).generate_keypair().unwrap();
+
+        let mut initiator = Builder::new(params.clone())
+            .local_private_key(&initiator_keys.private)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+
+        let mut encryption = [0u8; 1024];
+
+        let len = initiator.write_message(&[], &mut encryption).unwrap();
+
+        let authpkg = HandshakeHello::new(RELAY_VERSION_BYTES, Bytes::copy_from_slice(&encryption[..len]));
+
+        self.client_handle.send_unsecure(AnyPacket::HandshakeHelloPacket(authpkg)).await;
+
+        encryption_handler.encryption_state = EncryptionState::Handshake(initiator);
 
         loop {
              tokio::select! {
@@ -152,10 +180,7 @@ impl TCPClientContext {
                         },
                     }
 
-
-                    
-                    
-                    TCPClientPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut self.awaitable_cache).await;
+                    TCPClientPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut encryption_handler, &mut self.awaitable_cache).await;
 
 
                 }
@@ -166,42 +191,47 @@ impl TCPClientContext {
                     };
 
                     match instruction {
-                        ClientContextInstruction::Packet(mut packet) => {
-                            let (mut fixed, dynamic) = packet.encode(&mut write_buffer).unwrap();
+                        ClientContextInstruction::Packet {mut anypacket, encrypt} => {
+                            let mut buffer = anypacket.encode(&mut write_buffer).unwrap();
 
+                            if encrypt {
+                                println!("Encrypting {}", anypacket.get_id());
+                                if let EncryptionState::Encrypted(_) = &mut encryption_handler.encryption_state {
 
-                            match dynamic {
-                                Some(payload) => {
-                                    let mut combined = fixed.chain(payload);
-                                    if self.write_half.write_all_buf(&mut combined).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                None => {
-                                    if self.write_half.write_all_buf(&mut fixed).await.is_err() {
-                                        break;
-                                    }
+                                    println!("Encryptin!!!!");
+
+                                    let mut enc_packet = SecureBatch::new(encryption_handler.encrypt(&buffer).unwrap());
+                                    
+                                    buffer = enc_packet.encode(&mut write_buffer).unwrap();
+
                                 }
                             }
+
+                            
+                            if self.write_half.write_all(&mut buffer).await.is_err() {
+                                break;
+                            }
+                            
+
                         },
+                        
 
                         ClientContextInstruction::Awaitable {mut anypacket, sender} => {
                             let key = self.awaitable_cache.insert(sender);
 
-                            let (mut fixed, dynamic) = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
+                            let mut buffer = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
                             
-                            match dynamic {
-                                Some(payload) => {
-                                    let mut combined = fixed.chain(payload);
-                                    if self.write_half.write_all_buf(&mut combined).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                None => {
-                                    if self.write_half.write_all_buf(&mut fixed).await.is_err() {
-                                        break;
-                                    }
-                                }
+                            if let EncryptionState::Encrypted(_) = &mut encryption_handler.encryption_state {
+
+                                let mut enc_packet = SecureBatch::new(encryption_handler.encrypt(&buffer).unwrap());
+                                
+                                buffer = enc_packet.encode(&mut write_buffer).unwrap();
+                                
+                                
+                            }
+                                                        
+                            if self.write_half.write_all(&mut buffer).await.is_err() {
+                                break;
                             }
 
                         }
@@ -222,5 +252,6 @@ impl TCPClientContext {
         buffer.reserve(MAX_TCP_LENGTH);
         read_half.read_buf(buffer).await
     }
+
     
 }

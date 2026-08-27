@@ -1,15 +1,16 @@
-use crate::{networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packet::Packet, packets::error_packet::RelayError}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::TCPClientInstanceHandle}}, util::{ClientCallback, EncryptionHandler, EncryptionState, EncryptionTransport, RELAY_VERSION_BYTES, ServerCallback, noise_params}};
+use crate::{networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packet::Packet, packets::error_packet::RelayError}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, EncryptionHandler, EncryptionState, EncryptionTransport, RELAY_VERSION_BYTES, ServerCallback, noise_params}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use snow::Builder;
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-async fn handle_unsecure(packet: &HandshakeHello, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler) -> ServerCallback {
+async fn handle_unsecure(packet: &HandshakeHello, client_core: &mut TCPClientInstanceCore) -> ServerCallback {
 
+    
     if packet.version != RELAY_VERSION_BYTES {
         let response = RelayError::new(2);
-        client_handle.send(AnyPacket::RelayErrorPacket(response)).await;
+        client_core.get_client_handle().send(AnyPacket::RelayErrorPacket(response)).await;
         return ServerCallback::Kill;
     }
 
@@ -35,13 +36,9 @@ async fn handle_unsecure(packet: &HandshakeHello, client_handle: &mut TCPClientI
 
     let mut packet = HandshakeAck::new(Bytes::copy_from_slice(&server_public_key[..len]));
 
-    encryption_handler.encryption_state = EncryptionState::Handshake(responder);
-
-    packet.set_awaitable_client();
-    packet.set_nonce(packet.get_nonce());
-
+    client_core.get_encryption_handler().encryption_state = EncryptionState::Handshake(responder);
     
-    client_handle.send(AnyPacket::HandshakeAckPacket(packet)).await;
+    client_core.get_client_handle().send(AnyPacket::HandshakeAckPacket(packet)).await;
     ServerCallback::Pass
 
 }
@@ -52,12 +49,12 @@ pub struct HandshakeHello {
 }
 
 impl HandshakeHello {
-    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-        
-        match encryption_handler.encryption_state {
+    pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+            
+        match client_core.get_encryption_handler().encryption_state {
 
             EncryptionState::Unsecure => {
-                return handle_unsecure(self, client_handle, encryption_handler).await;
+                return handle_unsecure(self, client_core).await;
             },
             _ => ()
 
@@ -66,7 +63,7 @@ impl HandshakeHello {
         ServerCallback::Pass
     }
 
-    pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback{
+    pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler) -> ClientCallback{
 
         
         ClientCallback::Pass
@@ -80,17 +77,16 @@ pub struct HandshakeAck {
 }
 
 impl HandshakeAck {
-    pub async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-        
-
-        let old_state = std::mem::replace(&mut encryption_handler.encryption_state, EncryptionState::Unsecure);
+    pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+     
+        let old_state = std::mem::replace(&mut client_core.get_encryption_handler().encryption_state, EncryptionState::Unsecure);
 
         if let EncryptionState::Handshake(mut handshake) = old_state {
             let mut scratch = [0u8; 1024];
             let msg3_from_client = self.get_dynamic().as_ref();
             match handshake.read_message(msg3_from_client, &mut scratch) {
                 Ok(_n) => {
-                     encryption_handler.encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().unwrap());
+                     client_core.get_encryption_handler().encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().unwrap());
                      println!("[Server] Encrypted.");
                 }
                 Err(e) => println!("{:?}", e),
@@ -101,8 +97,34 @@ impl HandshakeAck {
         ServerCallback::Pass
     }
 
-    pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback{
+    pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler) -> ClientCallback{
+
+        let old_state = std::mem::replace(&mut encryption_handler.encryption_state, EncryptionState::Unsecure);
+
+        if let EncryptionState::Handshake(mut handshake) = old_state { 
+
+            let server_public_key = self.get_dynamic();
+            let mut buf = [0u8; 1024];
+            handshake.read_message(&server_public_key, &mut buf).unwrap(); 
+
+            let mut msg3 = [0u8; 255];
+            let len = handshake.write_message(&[], &mut msg3).unwrap();
+            let initiator_transport = handshake.into_transport_mode().unwrap();
+
         
+
+            let response = HandshakeAck::new(Bytes::copy_from_slice(&msg3[..len]));
+
+            client_handle.send_unsecure(AnyPacket::HandshakeAckPacket(response)).await;
+
+            encryption_handler.encryption_state = EncryptionState::Encrypted(initiator_transport);
+
+
+            println!("[Client] Encrypted");
+        }
+
+        
+
         
         ClientCallback::Pass
     }

@@ -345,14 +345,22 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     } else {
         quote::quote! {
-            async fn on_trigger_server_tcp(&self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler, manager_handler: &mut LobbyManagerHandle<TCPClientHandle>) -> ServerCallback {
-                ServerCallback::Pass
+            pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+               ServerCallback::Pass
             }
 
             async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle) -> ClientCallback {
                 ClientCallback::Pass
             }
         }
+    };
+
+    let dynamic_buffer_encode = if is_dynamic {
+        quote::quote! {
+            buf.extend_from_slice(&self.dynamic_buffer);
+        }
+    } else {
+        quote::quote! {}
     };
 
     quote::quote! {
@@ -380,12 +388,13 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             // `AsyncWriteVectored`) to avoid concatenating them into one
             // buffer before they hit the socket. Update the trait
             // definition if it doesn't already look like this.
-            fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)> {
+            fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes> {
                 buf.put_u8(Self::ID);
 
                 #(#field_writers)*
+                #dynamic_buffer_encode
 
-                Ok((buf.split().freeze(), #dynamic_payload_out))
+                Ok(buf.split().freeze())
             }
 
             fn get_size(&self) -> usize {

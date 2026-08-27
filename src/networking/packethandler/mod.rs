@@ -10,7 +10,7 @@ use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::handshake_packets::{HandshakeAck, HandshakeHello};
 use crate::networking::packethandler::packets::securebatch::SecureBatch;
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
-use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceHandle};
+use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle};
 use crate::util::{ClientCallback, EncryptionHandler, EncryptionState, ServerCallback};
 use bytes::{Bytes, BytesMut};
 use slab::Slab;
@@ -41,7 +41,7 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub async fn on_trigger_server_tcp(&mut self, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+                pub async fn on_trigger_server_tcp(&mut self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
                     let owned = std::mem::replace(self, AnyPacket::None);
                    
                     match owned {
@@ -49,7 +49,9 @@ macro_rules! register_packets {
                         AnyPacket::[<$packet Packet>](p) => {
                             if p.is_awaitable_server() {
                                 println!("Is awaitable_server");
-                                if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
+
+                                let mut awaitable_cache = client_core.get_awaitable_cache();
+                                if let Some(oneshot) = client_core.get_awaitable_cache().try_remove(p.get_nonce() as usize) {
 
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
                                     return ServerCallback::Pass;
@@ -58,14 +60,14 @@ macro_rules! register_packets {
                                 }
                             }
 
-                            p.on_trigger_server_tcp(client_handle, encryption_handler, lobby_manager).await
+                            p.on_trigger_server_tcp(client_core, lobby_manager).await
                         },
                         )*
                         _ => ServerCallback::Kill,
                     }
                 }
 
-                pub async fn on_trigger_client_tcp(&mut self, client_handle: &mut TCPClientHandle, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback {
+                pub async fn on_trigger_client_tcp(&mut self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback {
 
                     let owned = std::mem::replace(self, AnyPacket::None);
 
@@ -80,14 +82,14 @@ macro_rules! register_packets {
                                     return ClientCallback::Kill;
                                 }
                             }
-                            p.on_trigger_client_tcp(client_handle).await
+                            p.on_trigger_client_tcp(client_handle, encryption_handler).await
                         },
                         )*
                         _ => ClientCallback::Kill,
                     }
                 }
 
-                pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes> {
                     match self {
                         $(
                         AnyPacket::[<$packet Packet>](p) => p.encode(buf), 
@@ -96,7 +98,7 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub fn encode_awaitable_client(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode_awaitable_client(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<Bytes> {
                     match self {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
@@ -109,7 +111,7 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub fn encode_awaitable_server(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<(Bytes, Option<Bytes>)> {
+                pub fn encode_awaitable_server(&mut self, buf: &mut BytesMut, nonce: u64) -> io::Result<Bytes> {
                     match self {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
@@ -146,14 +148,14 @@ pub struct TCPClientPacketHandler;
 
 impl TCPClientPacketHandler {
     
-pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
+pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
         
         loop {
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ClientCallback::Kill,
                 AnyPacket::None => return ClientCallback::Pass,
                 mut other => { 
-                    match other.on_trigger_client_tcp(client_handle, awaitable_cache).await {
+                    match other.on_trigger_client_tcp(client_handle, encryption_handler, awaitable_cache).await {
                         ClientCallback::Pass => (),
                         other => return other,
 
@@ -170,14 +172,14 @@ pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHa
 pub struct TCPServerPacketHandler;
 
 impl TCPServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientInstanceHandle, encryption_handler: &mut EncryptionHandler, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ServerCallback {
+    pub async fn handle_packet(bytes: &mut BytesMut, client_core: &mut TCPClientInstanceCore,  lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
 
         loop {
 
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
-                mut other => { other.on_trigger_server_tcp(client_handle,  encryption_handler, lobby_manager, awaitable_cache).await;}
+                mut other => { other.on_trigger_server_tcp(client_core, lobby_manager).await;}
 
             }
         }

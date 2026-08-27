@@ -95,7 +95,7 @@ pub enum ClientCallback {
 
 pub enum ClientContextInstruction {
     Close, 
-    Packet(AnyPacket),
+    Packet {anypacket: AnyPacket, encrypt: bool},
     Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
 }
 
@@ -135,7 +135,7 @@ impl EncryptionHandler {
     }
 
 
-    pub fn decrypt(&mut self, blob: &Bytes) -> Result<Bytes, EncryptionError> {
+    pub fn decrypt(&mut self, blob: &Bytes) -> Result<BytesMut, EncryptionError> {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
                 let len = encrypt.read_message(
@@ -143,7 +143,7 @@ impl EncryptionHandler {
                         &mut self.encryption_buffer[..],
                     ).map_err(|_| EncryptionError::DecryptionFailed)?;
 
-                Ok(self.encryption_buffer.split_to(len).freeze())
+                Ok(self.encryption_buffer.split_to(len))
             }
             _ => Err(EncryptionError::InvalidState),
         }
@@ -153,7 +153,7 @@ impl EncryptionHandler {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
                 
-                let len = encrypt.read_message(&msg[..msg.len()], &mut self.encryption_buffer).unwrap();
+                let len = encrypt.write_message(&msg[..msg.len()], &mut self.encryption_buffer).unwrap();
 
                 Ok(self.encryption_buffer.split_to(len).freeze())
             }

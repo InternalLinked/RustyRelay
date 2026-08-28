@@ -1,11 +1,10 @@
 use std::{thread, time::Duration};
 
-use crate::{networking::packethandler::{AnyPacket::{self, SecureBatchPacket}, packets::{ack::Ack, handshake_packets::{HandshakeAck, HandshakeHello}, securebatch::SecureBatch}}, util::{RELAY_VERSION_BYTES, noise_params}};
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
 
-use crate::networking::{client::tcp::TCPClientHandle, server::{StreamHandle, tcp::TCPServerCore}};
+use crate::networking::{client::tcp::TCPClientHandle, packethandler::packets::ack::Ack, server::{StreamHandle, tcp::TCPServerCore}};
 
 
 mod util;
@@ -26,7 +25,7 @@ fn main() {
     let payload = Bytes::copy_from_slice(b"test");
 
     let pkg = Ack::new(12, payload);
-    thread::sleep(Duration::from_millis(1000));
+    //thread::sleep(Duration::from_millis(1000));
     handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
 
     println!("Done");

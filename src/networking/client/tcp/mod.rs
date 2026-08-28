@@ -9,11 +9,30 @@ use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
+use crate::networking::frame_reader::FramedStream;
 use crate::networking::packethandler::TCPClientPacketHandler;
-use crate::networking::packethandler::packets::handshake_packets::HandshakeHello;
-use crate::networking::packethandler::packets::securebatch::SecureBatch;
-use crate::util::{ClientCallback, ClientContextInstruction, EncryptionHandler, RELAY_VERSION_BYTES, client_runtime, noise_params};
+use crate::util::{ClientCallback, ClientContextInstruction, RELAY_VERSION_BYTES, client_runtime, noise_params};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
+
+
+pub struct TCPClientCore {
+
+    client_handle: TCPClientHandle,
+
+}
+
+impl TCPClientCore {
+    pub fn new(client_handle: TCPClientHandle) -> Self {
+
+        Self {client_handle}
+    }
+
+    pub fn get_client_handle(&mut self) -> &mut TCPClientHandle {
+        &mut self.client_handle
+    }
+
+}
+
 
 #[derive(Clone)]
 pub struct TCPClientHandle {
@@ -21,12 +40,6 @@ pub struct TCPClientHandle {
 }
 
 impl StreamHandle for TCPClientHandle {
-
-    async fn send_unsecure(&mut self, anypacket: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: false}).await.is_err() {
-            todo!("Handle closed client");
-        }
-    }
 
     async fn send(&mut self, anypacket: AnyPacket) {
         if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: true}).await.is_err() {
@@ -139,7 +152,7 @@ impl TCPClientContext {
     pub async fn run(&mut self) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
-        let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
+        /*let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
 
         let mut encryption_handler = EncryptionHandler::new();
@@ -244,7 +257,7 @@ impl TCPClientContext {
             }
         }
 
-        println!("[tcp_client] Close");
+        println!("[tcp_client] Close");*/
         
     }
 

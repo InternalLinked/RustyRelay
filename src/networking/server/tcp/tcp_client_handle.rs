@@ -8,9 +8,7 @@ use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, Owne
 
 use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::packethandler::packets::error_packet::RelayError;
-use crate::networking::packethandler::packets::handshake_packets::HandshakeAck;
-use crate::networking::packethandler::packets::securebatch::SecureBatch;
-use crate::util::{ClientContextInstruction, EncryptionError, EncryptionHandler, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
+use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
 use crate::util::EncryptionState::{Handshake, Unsecure};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
 
@@ -29,12 +27,6 @@ impl TCPClientInstanceHandle {
 }
 
 impl StreamHandle for TCPClientInstanceHandle {
-
-    async fn send_unsecure(&mut self, anypacket: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: false}).await.is_err() {
-            todo!("Handle closed client");
-        }
-    }
 
     async fn send(&mut self, anypacket: AnyPacket) {
         if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: true}).await.is_err() {
@@ -68,14 +60,13 @@ pub struct TCPClientInstanceCore {
 
     client_handle: TCPClientInstanceHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>,
-    encryption_handler: EncryptionHandler,
 
 }
 
 impl TCPClientInstanceCore {
     pub fn new(client_handle: TCPClientInstanceHandle) -> Self {
 
-        Self {client_handle, awaitable_cache: Slab::new(), encryption_handler: EncryptionHandler::new()}
+        Self {client_handle, awaitable_cache: Slab::new()}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientInstanceHandle {
@@ -86,9 +77,6 @@ impl TCPClientInstanceCore {
         &mut self.awaitable_cache
     }
 
-    pub fn get_encryption_handler(&mut self) -> &mut EncryptionHandler {
-        &mut self.encryption_handler
-    }
 }
 
 struct TCPClientContext {
@@ -135,7 +123,7 @@ impl TCPClientContext {
         
         let mut core = TCPClientInstanceCore::new(client_handle);
 
-        loop {
+        /*loop {
              tokio::select! {
                 callback = Self::read_buffer(&mut self.read_half, &mut read_buffer) => {
                     match callback {
@@ -206,7 +194,7 @@ impl TCPClientContext {
             }
         }
 
-        println!("[tcp_client] Close");
+        println!("[tcp_client] Close");*/
         
     }
 

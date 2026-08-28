@@ -3,15 +3,13 @@ pub mod packets;
 
 use std::io::{self};
 
-use crate::networking::client::tcp::TCPClientHandle;
+use crate::networking::client::tcp::{TCPClientCore, TCPClientHandle};
 use crate::networking::packethandler::packet::DynamicPacket;
 use crate::networking::packethandler::packets::ack::Ack;
 use crate::networking::packethandler::packets::error_packet::RelayError;
-use crate::networking::packethandler::packets::handshake_packets::{HandshakeAck, HandshakeHello};
-use crate::networking::packethandler::packets::securebatch::SecureBatch;
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle};
-use crate::util::{ClientCallback, EncryptionHandler, EncryptionState, ServerCallback};
+use crate::util::{ClientCallback, EncryptionState, ServerCallback};
 use bytes::{Bytes, BytesMut};
 use slab::Slab;
 use tokio::sync::oneshot;
@@ -50,7 +48,6 @@ macro_rules! register_packets {
                             if p.is_awaitable_server() {
                                 println!("Is awaitable_server");
 
-                                let mut awaitable_cache = client_core.get_awaitable_cache();
                                 if let Some(oneshot) = client_core.get_awaitable_cache().try_remove(p.get_nonce() as usize) {
 
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
@@ -67,7 +64,7 @@ macro_rules! register_packets {
                     }
                 }
 
-                pub async fn on_trigger_client_tcp(&mut self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback {
+                pub async fn on_trigger_client_tcp(&mut self, client_core: &mut TCPClientCore, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback {
 
                     let owned = std::mem::replace(self, AnyPacket::None);
 
@@ -82,7 +79,7 @@ macro_rules! register_packets {
                                     return ClientCallback::Kill;
                                 }
                             }
-                            p.on_trigger_client_tcp(client_handle, encryption_handler).await
+                            p.on_trigger_client_tcp(client_core).await
                         },
                         )*
                         _ => ClientCallback::Kill,
@@ -136,9 +133,6 @@ macro_rules! register_packets {
 register_packets!(
     Ack,
     RelayError,
-    HandshakeHello,
-    HandshakeAck,
-    SecureBatch
 );
 
 
@@ -148,14 +142,13 @@ pub struct TCPClientPacketHandler;
 
 impl TCPClientPacketHandler {
     
-pub async fn handle_packet(bytes: &mut BytesMut, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
-        
+pub async fn handle_packet(bytes: &mut BytesMut, client_core: &mut TCPClientCore, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
         loop {
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ClientCallback::Kill,
                 AnyPacket::None => return ClientCallback::Pass,
                 mut other => { 
-                    match other.on_trigger_client_tcp(client_handle, encryption_handler, awaitable_cache).await {
+                    match other.on_trigger_client_tcp(client_core, awaitable_cache).await {
                         ClientCallback::Pass => (),
                         other => return other,
 

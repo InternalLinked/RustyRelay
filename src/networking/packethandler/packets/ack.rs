@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::TCPClientHandle, packethandler::packet::Packet, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, EncryptionHandler, EncryptionState, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::packet::Packet, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -25,9 +25,7 @@ impl Ack {
         ServerCallback::Pass
     }
 
-    pub async fn on_trigger_client_tcp(&self, client_handle: &mut TCPClientHandle, encryption_handler: &mut EncryptionHandler) -> ClientCallback{
-
-        println!("Got ack back from server {}", self.get_nonce());
+    pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
         ClientCallback::Pass
     }

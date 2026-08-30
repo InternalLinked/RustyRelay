@@ -145,6 +145,7 @@ impl TCPClientContext {
         tokio::spawn(async move {
             context.run(client_handle_clone, read_half, write_half, encryption_handler).await;
         });
+
         client_handle
     }
 
@@ -186,7 +187,7 @@ impl TCPClientContext {
                             
                             let encoded = anypacket.encode(&mut write_buffer).unwrap();
                             let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
-                                println!("[Client] EncryptionError!");
+                                println!("[Client] Encryption error.");
                                 break;
                             };
 
@@ -205,7 +206,7 @@ impl TCPClientContext {
                             let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
                             
                             let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
-                                println!("[Client] EncryptionError!");
+                                println!("[Client] Encryption error.");
                                 break;
                             };
 
@@ -222,9 +223,6 @@ impl TCPClientContext {
                     }
                 }
 
-                
-
-            
             }
         }
 

@@ -166,7 +166,7 @@ pub struct ServerEncryptionLayer {
 
 impl ServerEncryptionLayer {
 
-    pub async fn new(stream: TcpStream) -> Result<(FramedReader<OwnedReadHalf>, FramedWriter<OwnedWriteHalf>), ()> {
+    pub async fn new(stream: TcpStream) -> Result<(FramedReader<OwnedReadHalf>, FramedWriter<OwnedWriteHalf>, EncryptionHandler), ()> {
 
         let (reader, writer) = stream.into_split();
         let mut reader = FramedReader::new(reader);
@@ -179,7 +179,7 @@ impl ServerEncryptionLayer {
         layer.handle_handshake(&mut reader, &mut writer).await.map_err(|e| e)?;
         layer.handle_ack(&mut reader, &mut writer).await.map_err(|e| e)?;
 
-        Ok((reader, writer))
+        Ok((reader, writer, layer.encryption_handler))
     }
 
     async fn handle_handshake(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
@@ -233,8 +233,6 @@ impl ServerEncryptionLayer {
         self.encryption_handler.encryption_state = EncryptionState::Encrypted(handshake);
 
         let check: u32 = 0x1337;
-
-        
 
         let buffer = self.encryption_handler.encrypt(&Bytes::copy_from_slice(&check.to_be_bytes())).map_err(|e| ())?;
 

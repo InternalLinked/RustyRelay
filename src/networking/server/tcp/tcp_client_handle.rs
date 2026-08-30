@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::client::tcp::TCPClientHandle;
-use crate::networking::encryption_layer::{ClientEncryptionLayer, ServerEncryptionLayer};
+use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler, ServerEncryptionLayer};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
@@ -82,8 +82,6 @@ impl TCPClientInstanceCore {
 }
 
 struct TCPClientContext {
-    read_half: FramedReader<OwnedReadHalf>,
-    write_half: FramedWriter<OwnedWriteHalf>,
     receiver: Receiver<ClientContextInstruction>,
     lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
 }
@@ -94,114 +92,100 @@ impl TCPClientContext {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
         let client_handle = TCPClientInstanceHandle { sender, id, counter: 0 };
 
-        ServerEncryptionLayer::new(stream).await.unwrap();
+        let (read_half, write_half, encryption_handler) = ServerEncryptionLayer::new(stream).await.unwrap();
 
-        /*let mut context = TCPClientContext {
-            read_half,
-            write_half,
+        let mut context = TCPClientContext {
             receiver,
             lobby_manager,
-        };*/
+        };
 
 
         let client_handle_clone  = client_handle.clone();
 
-        /*tokio::spawn(async move {
-            context.run(client_handle_clone).await;
-            let t = EncryptionState::Unsecure;
-            match t {
-                Unsecure => print!("!"),
-                _ => {}
-            }
-        });*/
+        tokio::spawn(async move {
+            context.run(client_handle_clone, read_half, write_half, encryption_handler).await;
+        });
         client_handle
     }
 
-    pub async fn run(&mut self, client_handle: TCPClientInstanceHandle) {
+    pub async fn run(&mut self, client_handle: TCPClientInstanceHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        
         let mut core = TCPClientInstanceCore::new(client_handle);
 
-        /*loop {
+        loop {
              tokio::select! {
-                callback = Self::read_buffer(&mut self.read_half, &mut read_buffer) => {
-                    match callback {
-                        Ok(0) => break,
-                        Ok(_n) => {
-                            // parse packets out of read_buffer here
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => {
-                            println!("Client error {e}");
-                            break;
+                callback = read_half.read_frame() => {
+
+                    let Ok(buffer) = callback else {
+                        break;
+                    };
+
+                    let Ok(mut buffer) = encryption_handler.decrypt(&buffer) else {
+                        println!("[Server] Decryption error");
+                        break;
+                    };
+
+                    match TCPServerPacketHandler::handle_packet(&mut buffer, &mut core, &mut self.lobby_manager).await {
+                        ServerCallback::Kill => {
+                            println!("[Server] Handler instructed to kill.");
                         },
+                        _ => ()
                     }
 
-                    TCPServerPacketHandler::handle_packet(&mut read_buffer, &mut core, &mut self.lobby_manager).await;
-
                 }
+
                 instruction = self.receiver.recv() => {
                     let Some(instruction) = instruction else {
                         break;
                     };
                     
                     match instruction {
-                        ClientContextInstruction::Packet {mut anypacket, encrypt} => {
-                            let mut buffer = anypacket.encode(&mut write_buffer).unwrap();
-
-                            if encrypt && let EncryptionState::Encrypted(_) = &mut core.get_encryption_handler().encryption_state {
-
-                                let mut enc_packet = SecureBatch::new(core.get_encryption_handler().encrypt(&buffer).unwrap());
-                                
-                                buffer = enc_packet.encode(&mut write_buffer).unwrap();
-                                
-                                
-                            }
-                            if self.write_half.write_all(&mut buffer).await.is_err() {
+                        ClientContextInstruction::Packet {mut anypacket} => {
+                            
+                            let encoded = anypacket.encode(&mut write_buffer).unwrap();
+                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                                println!("[Client] Encryption error.");
                                 break;
-                            }
+                            };
+
+                            let Ok(()) = write_half.write_frame(buffer).await else {
+                                println!("[Client] Write error");
+                                break;
+                            };
                             
 
                         },
                         
 
                         ClientContextInstruction::Awaitable {mut anypacket, sender} => {
-                            let key = core.get_awaitable_cache().insert(sender);
+                            let key = core.awaitable_cache.insert(sender);
 
-                            let mut buffer = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
+                            let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
                             
-                            if let EncryptionState::Encrypted(_) = &mut core.get_encryption_handler().encryption_state {
-
-                                let mut enc_packet = SecureBatch::new(core.get_encryption_handler().encrypt(&buffer).unwrap());
-                                
-                                buffer = enc_packet.encode(&mut write_buffer).unwrap();
-                                
-                                
-                            }
-                                                        
-                            if self.write_half.write_all(&mut buffer).await.is_err() {
+                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                                println!("[Client] Encryption error.");
                                 break;
-                            }
+                            };
+
+                            let Ok(()) = write_half.write_frame(buffer).await else {
+                                println!("[Client] Write error");
+                                break;
+                            };
 
                         }
 
                         ClientContextInstruction::Close => {
-                            return;
+                            break;
                         }
                     }
                 }
+
             }
         }
 
-        println!("[tcp_client] Close");*/
+        println!("[Client] Close");
         
-    }
-
-    async fn read_buffer(read_half: &mut OwnedReadHalf, buffer: &mut BytesMut) -> Result<usize, std::io::Error> {
-        buffer.reserve(MAX_TCP_LENGTH);
-        read_half.read_buf(buffer).await
     }
 }

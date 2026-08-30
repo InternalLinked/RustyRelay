@@ -186,6 +186,7 @@ impl TCPClientContext {
                         ClientContextInstruction::Packet {mut anypacket} => {
                             
                             let encoded = anypacket.encode(&mut write_buffer).unwrap();
+                            write_buffer.resize(MAX_TCP_LENGTH, 0);
                             let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
                                 println!("[Client] Encryption error.");
                                 break;

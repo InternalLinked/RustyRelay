@@ -163,7 +163,7 @@ impl TCPClientContext {
                             let key = core.awaitable_cache.insert(sender);
 
                             let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
-                            
+                            write_buffer.resize(MAX_TCP_LENGTH, 0);
                             let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
                                 println!("[Client] Encryption error.");
                                 break;

@@ -4,7 +4,7 @@ use bytes::{Bytes, BytesMut};
 
 use crate::{networking::{client::tcp::TCPClientHandle, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, EncryptionState, ServerCallback}};
 
-pub static MAX_TCP_LENGTH: usize = 4096;
+pub static MAX_TCP_LENGTH: usize = 8096;
 pub static MAX_UDP_LENGTH: usize = 512;
 
 pub trait AwaitablePacket: Packet + Awaitable {}

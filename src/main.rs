@@ -24,9 +24,14 @@ fn main() {
     
     let payload = Bytes::copy_from_slice(b"test");
 
-    let pkg = Ack::new(12, payload);
-    //thread::sleep(Duration::from_millis(1000));
-    handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
+    thread::sleep(Duration::from_millis(1000));
+
+    for x in 0..1000000 {
+        let pkg = Ack::new(12, payload.clone());
+        //thread::sleep(Duration::from_millis(1000));
+        handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
+    }
+
 
     println!("Done");
 

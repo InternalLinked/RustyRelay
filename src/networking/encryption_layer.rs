@@ -10,6 +10,7 @@ use crate::{networking::{frame_reader::{FramedReader, FramedWriter}, packethandl
 #[derive(Debug)]
 pub enum EncryptionError {
     DecryptionFailed,
+    EncryptionFailed,
     InvalidState,
     BufferTooSmall,
     SetupError,
@@ -19,6 +20,7 @@ impl std::fmt::Display for EncryptionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EncryptionError::DecryptionFailed => write!(f, "failed to decrypt message"),
+            EncryptionError::EncryptionFailed => write!(f, "failed to encrypt message"),
             EncryptionError::InvalidState => write!(f, "invalid encryption state"),
             EncryptionError::BufferTooSmall => write!(f, "encryption buffer is too small"),
             EncryptionError::SetupError => write!(f, "setting up encryption failed"),
@@ -36,7 +38,7 @@ impl EncryptionHandler {
 
     pub fn new() -> Self {
 
-        let buffer = BytesMut::zeroed(8096);
+        let buffer = BytesMut::zeroed(MAX_TCP_LENGTH);
         
         EncryptionHandler { encryption_state: EncryptionState::Unsecure, encryption_buffer: buffer }
 
@@ -51,7 +53,10 @@ impl EncryptionHandler {
                         &mut self.encryption_buffer[..],
                     ).map_err(|_| EncryptionError::DecryptionFailed)?;
 
-                Ok(self.encryption_buffer.split_to(len))
+
+                let out = self.encryption_buffer.split_to(len);
+                self.encryption_buffer.resize(MAX_TCP_LENGTH, 0);
+                Ok(out)
             }
             _ => Err(EncryptionError::InvalidState),
         }
@@ -61,9 +66,12 @@ impl EncryptionHandler {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
                 
-                let len = encrypt.write_message(&msg[..msg.len()], &mut self.encryption_buffer).unwrap();
+                let len = encrypt.write_message(&msg[..msg.len()], &mut self.encryption_buffer).map_err(|_| return EncryptionError::EncryptionFailed)?;
 
-                Ok(self.encryption_buffer.split_to(len).freeze())
+                let out = self.encryption_buffer.split_to(len).freeze();
+                self.encryption_buffer.resize(MAX_TCP_LENGTH, 0);
+                Ok(out)
+                
             }
             _ => Err(EncryptionError::InvalidState),
         }
@@ -149,10 +157,11 @@ impl ClientEncryptionLayer {
         let buffer = reader.read_frame().await.map_err(|e| ())?;
         let buffer = self.encryption_handler.decrypt(&buffer).map_err(|e| ())?;
         if u32::from_be_bytes(buffer[..4].try_into().unwrap()) != 0x1337 {
+            println!("[Client] Encryption check was not successfull");
             return Err(());
         }
 
-
+        println!("[Client] Successfully encrypted");
         Ok(())
     }
 

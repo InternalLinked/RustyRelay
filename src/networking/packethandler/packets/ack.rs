@@ -12,8 +12,6 @@ pub struct Ack {
 impl Ack {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
          
-        println!("Yup triggered");
-
         let client_handle = client_core.get_client_handle();
 
         client_handle.counter += 1;

@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::thread;
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut, buf};
 use slab::Slab;
 use snow::Builder;
 use snow::params::NoiseParams;
@@ -43,7 +43,7 @@ pub struct TCPClientHandle {
 impl StreamHandle for TCPClientHandle {
 
     async fn send(&mut self, anypacket: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: true}).await.is_err() {
+        if self.sender.send(ClientContextInstruction::Packet {anypacket}).await.is_err() {
             todo!("Handle closed client");
         }
     }
@@ -100,7 +100,7 @@ impl TCPClientHandle {
     }
 
     pub fn blocking_send(&mut self, anypacket: AnyPacket) -> io::Result<()> {
-        self.sender.blocking_send(ClientContextInstruction::Packet {anypacket, encrypt: true})
+        self.sender.blocking_send(ClientContextInstruction::Packet {anypacket})
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
@@ -148,9 +148,10 @@ impl TCPClientContext {
         client_handle
     }
 
-    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, encryption_handler: EncryptionHandler) {
+    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
+        let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut core = TCPClientCore::new(client_handle);
 
         loop {
@@ -161,23 +162,74 @@ impl TCPClientContext {
                         break;
                     };
 
-                    println!("got buffer");
+                    let Ok(mut buffer) = encryption_handler.decrypt(&buffer) else {
+                        println!("[Client] Encryption handler");
+                        break;
+                    };
 
-                    
-
+                    match TCPClientPacketHandler::handle_packet(&mut buffer, &mut core, &mut self.awaitable_cache).await {
+                        ClientCallback::Kill => {
+                            println!("[Client] Handler instructed to kill.");
+                        },
+                        _ => ()
+                    }
 
                 }
+
+                instruction = self.receiver.recv() => {
+                    let Some(instruction) = instruction else {
+                        break;
+                    };
+                    
+                    match instruction {
+                        ClientContextInstruction::Packet {mut anypacket} => {
+                            
+                            let encoded = anypacket.encode(&mut write_buffer).unwrap();
+                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                                println!("[Client] EncryptionError!");
+                                break;
+                            };
+
+                            let Ok(()) = write_half.write_frame(buffer).await else {
+                                println!("[Client] Write error");
+                                break;
+                            };
+                            
+
+                        },
+                        
+
+                        ClientContextInstruction::Awaitable {mut anypacket, sender} => {
+                            let key = self.awaitable_cache.insert(sender);
+
+                            let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
+                            
+                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                                println!("[Client] EncryptionError!");
+                                break;
+                            };
+
+                            let Ok(()) = write_half.write_frame(buffer).await else {
+                                println!("[Client] Write error");
+                                break;
+                            };
+
+                        }
+
+                        ClientContextInstruction::Close => {
+                            break;
+                        }
+                    }
+                }
+
+                
+
             
             }
         }
 
-        println!("[tcp_client] Close");
+        println!("[Client] Close");
         
-    }
-
-    async fn read_buffer(read_half: &mut OwnedReadHalf, buffer: &mut BytesMut) -> Result<usize, std::io::Error> {
-        buffer.reserve(MAX_TCP_LENGTH);
-        read_half.read_buf(buffer).await
     }
 
     

@@ -77,7 +77,7 @@ pub enum ClientCallback {
 
 pub enum ClientContextInstruction {
     Close, 
-    Packet {anypacket: AnyPacket, encrypt: bool},
+    Packet {anypacket: AnyPacket },
     Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
 }
 

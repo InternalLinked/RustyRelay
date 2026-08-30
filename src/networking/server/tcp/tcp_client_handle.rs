@@ -31,7 +31,7 @@ impl TCPClientInstanceHandle {
 impl StreamHandle for TCPClientInstanceHandle {
 
     async fn send(&mut self, anypacket: AnyPacket) {
-        if self.sender.send(ClientContextInstruction::Packet {anypacket, encrypt: true}).await.is_err() {
+        if self.sender.send(ClientContextInstruction::Packet {anypacket}).await.is_err() {
             todo!("Handle closed client");
         }
     }

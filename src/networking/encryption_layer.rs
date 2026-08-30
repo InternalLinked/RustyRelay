@@ -28,8 +28,6 @@ impl std::fmt::Display for EncryptionError {
     }
 }
 
-/// Thin wrapper around a snow `TransportState` (or handshake state).
-/// It no longer owns a scratch buffer - callers must supply one.
 pub struct EncryptionHandler {
     pub encryption_state: EncryptionState,
 }
@@ -40,10 +38,6 @@ impl EncryptionHandler {
         EncryptionHandler { encryption_state: EncryptionState::Unsecure }
     }
 
-    // NOTE: signature uses `out: &mut BytesMut` rather than `&BytesMut` as originally
-    // requested - `snow`'s read_message/write_message need a mutable byte slice to
-    // write the result into, so the buffer can't be borrowed immutably here.
-    /// Decrypts `blob` into `out`, returning the number of plaintext bytes written.
     pub fn decrypt(&mut self, blob: &Bytes, out: &mut BytesMut) -> Result<usize, EncryptionError> {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {

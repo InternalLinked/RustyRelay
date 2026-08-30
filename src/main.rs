@@ -26,7 +26,7 @@ fn main() {
 
     let pkg = Ack::new(12, payload);
     //thread::sleep(Duration::from_millis(1000));
-    handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
+    //handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
 
     println!("Done");
 

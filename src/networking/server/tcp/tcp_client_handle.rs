@@ -7,6 +7,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::client::tcp::TCPClientHandle;
+use crate::networking::encryption_layer::{ClientEncryptionLayer, ServerEncryptionLayer};
+use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
 use crate::util::EncryptionState::{Handshake, Unsecure};
@@ -80,8 +82,8 @@ impl TCPClientInstanceCore {
 }
 
 struct TCPClientContext {
-    read_half: OwnedReadHalf,
-    write_half: OwnedWriteHalf,
+    read_half: FramedReader<OwnedReadHalf>,
+    write_half: FramedWriter<OwnedWriteHalf>,
     receiver: Receiver<ClientContextInstruction>,
     lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
 }
@@ -92,26 +94,26 @@ impl TCPClientContext {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
         let client_handle = TCPClientInstanceHandle { sender, id, counter: 0 };
 
-        let (read_half, write_half) = stream.into_split();
+        ServerEncryptionLayer::new(stream).await.unwrap();
 
-        let mut context = TCPClientContext {
+        /*let mut context = TCPClientContext {
             read_half,
             write_half,
             receiver,
             lobby_manager,
-        };
+        };*/
 
 
         let client_handle_clone  = client_handle.clone();
 
-        tokio::spawn(async move {
+        /*tokio::spawn(async move {
             context.run(client_handle_clone).await;
             let t = EncryptionState::Unsecure;
             match t {
                 Unsecure => print!("!"),
                 _ => {}
             }
-        });
+        });*/
         client_handle
     }
 

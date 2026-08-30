@@ -9,7 +9,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::networking::frame_reader::FramedStream;
+use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler};
+use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::TCPClientPacketHandler;
 use crate::util::{ClientCallback, ClientContextInstruction, RELAY_VERSION_BYTES, client_runtime, noise_params};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
@@ -121,10 +122,7 @@ impl TCPClientHandle {
 
 
 struct TCPClientContext {
-    read_half: OwnedReadHalf,
-    write_half: OwnedWriteHalf,
     receiver: Receiver<ClientContextInstruction>,
-    client_handle: TCPClientHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>
 }
 
@@ -133,131 +131,47 @@ impl TCPClientContext {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
         let client_handle = TCPClientHandle { sender };
 
-        let (read_half, write_half) = stream.into_split();
+        
+
+        let (read_half, write_half, encryption_handler) = ClientEncryptionLayer::new(stream).await.unwrap();
 
         let mut context = TCPClientContext {
-            read_half,
-            write_half,
             receiver,
-            client_handle: client_handle.clone(),
             awaitable_cache: Slab::new(),
         };
 
+        let client_handle_clone = client_handle.clone();
+
         tokio::spawn(async move {
-            context.run().await;
+            context.run(client_handle_clone, read_half, write_half, encryption_handler).await;
         });
         client_handle
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, encryption_handler: EncryptionHandler) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
-        /*let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-
-        let mut encryption_handler = EncryptionHandler::new();
-
-        let params: NoiseParams = noise_params().clone();
-
-        let initiator_keys = Builder::new(params.clone()).generate_keypair().unwrap();
-
-        let mut initiator = Builder::new(params.clone())
-            .local_private_key(&initiator_keys.private)
-            .unwrap()
-            .build_initiator()
-            .unwrap();
-
-        let mut encryption = [0u8; 1024];
-
-        let len = initiator.write_message(&[], &mut encryption).unwrap();
-
-        let authpkg = HandshakeHello::new(RELAY_VERSION_BYTES, Bytes::copy_from_slice(&encryption[..len]));
-
-        self.client_handle.send_unsecure(AnyPacket::HandshakeHelloPacket(authpkg)).await;
-
-        encryption_handler.encryption_state = EncryptionState::Handshake(initiator);
+        let mut core = TCPClientCore::new(client_handle);
 
         loop {
              tokio::select! {
-                callback = Self::read_buffer(&mut self.read_half, &mut read_buffer) => {
+                callback = read_half.read_frame() => {
 
-                    match callback {
-                        Ok(0) => break,
-                        Ok(_n) => {
-                            // parse packets out of read_buffer here
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => {
-                            println!("Client error {e}");
-                            break;
-                        },
-                    }
-
-                    TCPClientPacketHandler::handle_packet(&mut read_buffer, &mut self.client_handle, &mut encryption_handler, &mut self.awaitable_cache).await;
-
-
-                }
-                instruction = self.receiver.recv() => {
-
-                    let Some(instruction) = instruction else {
+                    let Ok(buffer) = callback else {
                         break;
                     };
 
-                    match instruction {
-                        ClientContextInstruction::Packet {mut anypacket, encrypt} => {
-                            let mut buffer = anypacket.encode(&mut write_buffer).unwrap();
+                    println!("got buffer");
 
-                            if encrypt {
-                                println!("Encrypting {}", anypacket.get_id());
-                                if let EncryptionState::Encrypted(_) = &mut encryption_handler.encryption_state {
+                    
 
-                                    println!("Encryptin!!!!");
 
-                                    let mut enc_packet = SecureBatch::new(encryption_handler.encrypt(&buffer).unwrap());
-                                    
-                                    buffer = enc_packet.encode(&mut write_buffer).unwrap();
-
-                                }
-                            }
-
-                            
-                            if self.write_half.write_all(&mut buffer).await.is_err() {
-                                break;
-                            }
-                            
-
-                        },
-                        
-
-                        ClientContextInstruction::Awaitable {mut anypacket, sender} => {
-                            let key = self.awaitable_cache.insert(sender);
-
-                            let mut buffer = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
-                            
-                            if let EncryptionState::Encrypted(_) = &mut encryption_handler.encryption_state {
-
-                                let mut enc_packet = SecureBatch::new(encryption_handler.encrypt(&buffer).unwrap());
-                                
-                                buffer = enc_packet.encode(&mut write_buffer).unwrap();
-                                
-                                
-                            }
-                                                        
-                            if self.write_half.write_all(&mut buffer).await.is_err() {
-                                break;
-                            }
-
-                        }
-
-                        ClientContextInstruction::Close => {
-                            return;
-                        }
-                    }
                 }
+            
             }
         }
 
-        println!("[tcp_client] Close");*/
+        println!("[tcp_client] Close");
         
     }
 

@@ -47,19 +47,19 @@ impl std::error::Error for FrameError {
 /// `AsyncWrite` stream (e.g. `TcpStream`).
 ///
 /// Wire format: `[4-byte big-endian length][length bytes of payload]`.
-pub struct FramedStream<S> {
-    inner: S,
+pub struct FramedReader<R> {
+    inner: R,
     read_buf: BytesMut,
 }
  
-impl<S> FramedStream<S> {
-    pub fn new(inner: S) -> Self {
+impl<R> FramedReader<R> {
+    pub fn new(inner: R) -> Self {
         Self { inner, read_buf: BytesMut::with_capacity(READ_CHUNK) }
     }
 }
  
-impl<S: AsyncRead + Unpin> FramedStream<S> {
-    /// Reads one full frame and returns it as a `Bytes`  a cheap,
+impl<R: AsyncRead + Unpin> FramedReader<R> {
+    /// Reads one full frame and returns it as a `Bytes` — a cheap,
     /// refcounted slice, not a fresh allocation.
     pub async fn read_frame(&mut self) -> Result<Bytes, FrameError> {
         loop {
@@ -106,18 +106,29 @@ impl<S: AsyncRead + Unpin> FramedStream<S> {
  
         // split_to gives back the header+payload bytes and leaves any
         // following, already-buffered data (the start of the next frame)
-        // in `self.read_buf` no copying either side.
+        // in `self.read_buf` — no copying either side.
         let mut frame = self.read_buf.split_to(total);
         let payload = frame.split_off(4).freeze();
         Ok(Some(payload))
     }
 }
  
-impl<S: AsyncWrite + Unpin> FramedStream<S> {
+/// Writes `u32` length-prefixed frames to an `AsyncWrite` half of a stream.
+/// Owns only the *write* side, for the same reason as `FramedReader`.
+pub struct FramedWriter<W> {
+    inner: W,
+}
+ 
+impl<W: AsyncWrite + Unpin> FramedWriter<W> {
+    pub fn new(inner: W) -> Self {
+        Self { inner }
+    }
+ 
     /// Writes one length-prefixed frame. Accepts anything cheaply
     /// convertible into `Bytes` (a `Bytes` itself, `Vec<u8>`, `&'static
     /// [u8]`, ...) so passing an already-owned buffer doesn't copy it.
-    pub async fn write_frame(&mut self, payload: &[u8]) -> Result<(), FrameError> {
+    pub async fn write_frame(&mut self, payload: impl Into<Bytes>) -> Result<(), FrameError> {
+        let payload = payload.into();
         if payload.len() as u64 > MAX_FRAME_LEN as u64 {
             return Err(FrameError::FrameTooLarge(payload.len() as u32));
         }
@@ -128,4 +139,17 @@ impl<S: AsyncWrite + Unpin> FramedStream<S> {
         Ok(())
     }
 }
-
+ 
+/// Splits any combined `AsyncRead + AsyncWrite` stream into an independent
+/// `FramedReader` / `FramedWriter` pair. For `TcpStream` specifically,
+/// prefer `TcpStream::into_split()` (used below) — it's lock-free, since a
+/// TCP socket's two directions are already independent at the OS level.
+/// `tokio::io::split` here is the generic fallback for stream types that
+/// don't offer their own split.
+pub fn split<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
+) -> (FramedReader<tokio::io::ReadHalf<S>>, FramedWriter<tokio::io::WriteHalf<S>>) {
+    let (r, w) = tokio::io::split(stream);
+    (FramedReader::new(r), FramedWriter::new(w))
+}
+ 

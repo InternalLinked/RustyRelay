@@ -112,6 +112,7 @@ impl TCPClientContext {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
+        let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut core = TCPClientInstanceCore::new(client_handle);
 
         loop {
@@ -122,14 +123,15 @@ impl TCPClientContext {
                         break;
                     };
 
-                    let Ok(mut buffer) = encryption_handler.decrypt(&buffer) else {
+                    let Ok(len) = encryption_handler.decrypt(&buffer, &mut read_buffer) else {
                         println!("[Server] Decryption error");
                         break;
                     };
 
-                    match TCPServerPacketHandler::handle_packet(&mut buffer, &mut core, &mut self.lobby_manager).await {
+                    match TCPServerPacketHandler::handle_packet(&mut read_buffer.split_to(len), &mut core, &mut self.lobby_manager).await {
                         ServerCallback::Kill => {
                             println!("[Server] Handler instructed to kill.");
+                            break;
                         },
                         _ => ()
                     }
@@ -145,12 +147,13 @@ impl TCPClientContext {
                         ClientContextInstruction::Packet {mut anypacket} => {
                             
                             let encoded = anypacket.encode(&mut write_buffer).unwrap();
-                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                            //write_buffer.resize(MAX_TCP_LENGTH, 0);
+                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut write_buffer) else {
                                 println!("[Client] Encryption error.");
                                 break;
                             };
 
-                            let Ok(()) = write_half.write_frame(buffer).await else {
+                            let Ok(()) = write_half.write_frame(&mut write_buffer.split_to(len).freeze()).await else {
                                 println!("[Client] Write error");
                                 break;
                             };
@@ -163,13 +166,13 @@ impl TCPClientContext {
                             let key = core.awaitable_cache.insert(sender);
 
                             let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
-                            write_buffer.resize(MAX_TCP_LENGTH, 0);
-                            let Ok(buffer) = encryption_handler.encrypt(&encoded) else {
+                            //write_buffer.resize(MAX_TCP_LENGTH, 0);
+                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut write_buffer) else {
                                 println!("[Client] Encryption error.");
                                 break;
                             };
 
-                            let Ok(()) = write_half.write_frame(buffer).await else {
+                            let Ok(()) = write_half.write_frame(&mut write_buffer.split_to(len).freeze()).await else {
                                 println!("[Client] Write error");
                                 break;
                             };

@@ -1,7 +1,6 @@
 use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::packet::Packet, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
 #[packet_macro::packet(2, true, false, false, 128, 64, 30)]

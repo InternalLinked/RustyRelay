@@ -28,61 +28,55 @@ impl std::fmt::Display for EncryptionError {
     }
 }
 
-
+/// Thin wrapper around a snow `TransportState` (or handshake state).
+/// It no longer owns a scratch buffer - callers must supply one.
 pub struct EncryptionHandler {
     pub encryption_state: EncryptionState,
-    encryption_buffer: BytesMut
 }
 
 impl EncryptionHandler {
 
     pub fn new() -> Self {
-
-        let buffer = BytesMut::zeroed(MAX_TCP_LENGTH);
-        
-        EncryptionHandler { encryption_state: EncryptionState::Unsecure, encryption_buffer: buffer }
-
+        EncryptionHandler { encryption_state: EncryptionState::Unsecure }
     }
 
-
-    pub fn decrypt(&mut self, blob: &Bytes) -> Result<BytesMut, EncryptionError> {
+    // NOTE: signature uses `out: &mut BytesMut` rather than `&BytesMut` as originally
+    // requested - `snow`'s read_message/write_message need a mutable byte slice to
+    // write the result into, so the buffer can't be borrowed immutably here.
+    /// Decrypts `blob` into `out`, returning the number of plaintext bytes written.
+    pub fn decrypt(&mut self, blob: &Bytes, out: &mut BytesMut) -> Result<usize, EncryptionError> {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
-                let len = encrypt.read_message(
-                        &blob[..blob.len()],
-                        &mut self.encryption_buffer[..],
-                    ).map_err(|_| EncryptionError::DecryptionFailed)?;
+                out.resize(blob.len(), 0);
+                let len = encrypt
+                    .read_message(&blob[..blob.len()], &mut out[..])
+                    .map_err(|_| EncryptionError::DecryptionFailed)?;
 
-
-                let out = self.encryption_buffer.split_to(len);
-                self.encryption_buffer.resize(MAX_TCP_LENGTH, 0);
-                Ok(out)
+                Ok(len)
             }
             _ => Err(EncryptionError::InvalidState),
         }
     }
 
-    pub fn encrypt(&mut self, msg: &Bytes) -> Result<Bytes, EncryptionError> {
+    pub fn encrypt(&mut self, msg: &Bytes, out: &mut BytesMut) -> Result<usize, EncryptionError> {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
-                
-                let len = encrypt.write_message(&msg[..msg.len()], &mut self.encryption_buffer).map_err(|_| return EncryptionError::EncryptionFailed)?;
+                out.resize(msg.len() + 16, 0);
+                let len = encrypt
+                    .write_message(&msg[..msg.len()], &mut out[..]).unwrap_or_else(|e| panic!("write_message failed: {:?}, msg.len()={}, buf.len()={}", e, msg.len(), out.len()));
 
-                let out = self.encryption_buffer.split_to(len).freeze();
-                self.encryption_buffer.resize(MAX_TCP_LENGTH, 0);
-                Ok(out)
-                
+                Ok(len)
             }
             _ => Err(EncryptionError::InvalidState),
         }
     }
-    
+
 }
 
 
 pub struct ClientEncryptionLayer {
     encryption_handler: EncryptionHandler,
-    encryption_buffer: BytesMut
+    encryption_buffer: BytesMut,
 }
 
 impl ClientEncryptionLayer {
@@ -93,7 +87,10 @@ impl ClientEncryptionLayer {
         let mut reader = FramedReader::new(reader);
         let mut writer = FramedWriter::new(writer);
 
-        let mut layer = Self {encryption_handler: EncryptionHandler::new(), encryption_buffer: BytesMut::zeroed(255)};
+        let mut layer = Self {
+            encryption_handler: EncryptionHandler::new(),
+            encryption_buffer: BytesMut::zeroed(MAX_TCP_LENGTH + 16),
+        };
 
         layer.do_ack(&mut reader, &mut writer).await?;
         layer.handle_ack(&mut reader, &mut writer).await?;
@@ -107,18 +104,16 @@ impl ClientEncryptionLayer {
         println!("[Client] doing handshake");
         let params: NoiseParams = noise_params().clone();
 
-        let initiator_keys = Builder::new(params.clone()).generate_keypair().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)).map_err(|e| ())?;
+        let initiator_keys = Builder::new(params.clone()).generate_keypair().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)).map_err(|_| ())?;
 
-        let builder = Builder::new(params.clone()).local_private_key(&initiator_keys.private).map_err(|e| ())?;
-        let mut initiator = builder.build_initiator().map_err(|e| ())?;
+        let builder = Builder::new(params.clone()).local_private_key(&initiator_keys.private).map_err(|_| ())?;
+        let mut initiator = builder.build_initiator().map_err(|_| ())?;
 
-        let mut encryption = BytesMut::zeroed(50);
-
-        let len = initiator.write_message(&[], &mut encryption).map_err(|e| ())?;
+        let len = initiator.write_message(&[], &mut self.encryption_buffer).map_err(|_| ())?;
 
         self.encryption_handler.encryption_state = EncryptionState::Handshake(initiator);
 
-        writer.write_frame(encryption.split_to(len)).await.map_err(|e| ())?;
+        writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
 
         Ok(())
     }
@@ -129,21 +124,19 @@ impl ClientEncryptionLayer {
         let old_state = std::mem::replace(&mut self.encryption_handler.encryption_state, EncryptionState::Unsecure);
 
         let EncryptionState::Handshake(mut handshake) = old_state else {
-
             return Err(());
         };
 
-        let server_public_key = reader.read_frame().await.map_err(|e| ())?;
+        let server_public_key = reader.read_frame().await.map_err(|_| ())?;
 
         let mut buf = [0u8; 1024];
-        handshake.read_message(&server_public_key, &mut buf).unwrap(); 
+        handshake.read_message(&server_public_key, &mut buf).unwrap();
 
+        let len = handshake.write_message(&[], &mut self.encryption_buffer).map_err(|_| ())?;
 
-        let len = handshake.write_message(&[], &mut self.encryption_buffer).map_err(|e| ())?;
+        self.encryption_handler.encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().map_err(|_| ())?);
 
-        self.encryption_handler.encryption_state = EncryptionState::Encrypted(handshake.into_transport_mode().map_err(|e| ())?);
-
-        writer.write_frame(self.encryption_buffer.split_to(len).freeze()).await.map_err(|e| ())?;
+        writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
 
         println!("[Client] Handle");
         Ok(())
@@ -154,9 +147,10 @@ impl ClientEncryptionLayer {
 
         println!("[Client] Waiting for check");
 
-        let buffer = reader.read_frame().await.map_err(|e| ())?;
-        let buffer = self.encryption_handler.decrypt(&buffer).map_err(|e| ())?;
-        if u32::from_be_bytes(buffer[..4].try_into().unwrap()) != 0x1337 {
+        let frame = reader.read_frame().await.map_err(|_| ())?;
+        let len = self.encryption_handler.decrypt(&frame, &mut self.encryption_buffer).map_err(|_| ())?;
+
+        if len < 4 || u32::from_be_bytes(self.encryption_buffer[..4].try_into().unwrap()) != 0x1337 {
             println!("[Client] Encryption check was not successfull");
             return Err(());
         }
@@ -165,12 +159,11 @@ impl ClientEncryptionLayer {
         Ok(())
     }
 
-
-
 }
 
 pub struct ServerEncryptionLayer {
     encryption_handler: EncryptionHandler,
+    encryption_buffer: BytesMut,
 }
 
 impl ServerEncryptionLayer {
@@ -181,39 +174,38 @@ impl ServerEncryptionLayer {
         let mut reader = FramedReader::new(reader);
         let mut writer = FramedWriter::new(writer);
 
+        let mut layer = Self {
+            encryption_handler: EncryptionHandler::new(),
+            encryption_buffer: BytesMut::zeroed(MAX_TCP_LENGTH + 16),
+        };
 
-        let mut layer = Self {encryption_handler: EncryptionHandler::new()};
-
-
-        layer.handle_handshake(&mut reader, &mut writer).await.map_err(|e| e)?;
-        layer.handle_ack(&mut reader, &mut writer).await.map_err(|e| e)?;
+        layer.handle_handshake(&mut reader, &mut writer).await?;
+        layer.handle_ack(&mut reader, &mut writer).await?;
 
         Ok((reader, writer, layer.encryption_handler))
     }
 
     async fn handle_handshake(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
         println!("[Server] trying to read frame");
-        let client_public_key = reader.read_frame().await.map_err(|e| ())?;
+        let client_public_key = reader.read_frame().await.map_err(|_| ())?;
 
-        let mut server_public_key = BytesMut::zeroed(100);
         let params = noise_params().clone();
 
-        let responder_keys = Builder::new(params.clone()).generate_keypair().map_err(|e| ())?;
+        let responder_keys = Builder::new(params.clone()).generate_keypair().map_err(|_| ())?;
 
         let mut responder = Builder::new(params.clone())
-            .local_private_key(&responder_keys.private).map_err(|e| ())?
-            .build_responder().map_err(|e| ())?;
+            .local_private_key(&responder_keys.private).map_err(|_| ())?
+            .build_responder().map_err(|_| ())?;
 
         let _len = responder
-        .read_message(&client_public_key, &mut server_public_key).map_err(|e| ())?;
-
+            .read_message(&client_public_key, &mut self.encryption_buffer).map_err(|_| ())?;
 
         let len = responder
-        .write_message(&[], &mut server_public_key).map_err(|e| ())?;
+            .write_message(&[], &mut self.encryption_buffer).map_err(|_| ())?;
 
         self.encryption_handler.encryption_state = EncryptionState::Handshake(responder);
 
-        writer.write_frame(server_public_key.split_to(len).freeze()).await.map_err(|e| ())?;
+        writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
         println!("[Server] Send ack");
 
         Ok(())
@@ -228,24 +220,25 @@ impl ServerEncryptionLayer {
             return Err(());
         };
 
-
         let mut scratch = [0u8; 1024];
 
-        let msg3 = reader.read_frame().await.map_err(|e| ())?;
+        let msg3 = reader.read_frame().await.map_err(|_| ())?;
 
-        handshake.read_message(&msg3, &mut scratch).map_err(|e| ())?;
+        handshake.read_message(&msg3, &mut scratch).map_err(|_| ())?;
 
         println!("[Server] Successfully encrypted");
 
-        let handshake = handshake.into_transport_mode().map_err(|e| ())?;
+        let handshake = handshake.into_transport_mode().map_err(|_| ())?;
 
         self.encryption_handler.encryption_state = EncryptionState::Encrypted(handshake);
 
         let check: u32 = 0x1337;
 
-        let buffer = self.encryption_handler.encrypt(&Bytes::copy_from_slice(&check.to_be_bytes())).map_err(|e| ())?;
+        let len = self.encryption_handler
+            .encrypt(&Bytes::copy_from_slice(&check.to_be_bytes()), &mut self.encryption_buffer)
+            .map_err(|_| ())?;
 
-        writer.write_frame(buffer).await.map_err(|e| ())?;
+        writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
 
         Ok(())
     }

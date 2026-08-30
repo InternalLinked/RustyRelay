@@ -3,9 +3,11 @@ use std::io;
 use bytes::{Bytes, BytesMut};
 use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}, net::TcpStream};
 
+use crate::networking::packethandler::packet::MAX_TCP_LENGTH;
+
 pub const MAX_FRAME_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
  
-const READ_CHUNK: usize = 8 * 1024;
+const READ_CHUNK: usize = MAX_TCP_LENGTH;
 
 #[derive(Debug)]
 pub enum FrameError {
@@ -127,8 +129,7 @@ impl<W: AsyncWrite + Unpin> FramedWriter<W> {
     /// Writes one length-prefixed frame. Accepts anything cheaply
     /// convertible into `Bytes` (a `Bytes` itself, `Vec<u8>`, `&'static
     /// [u8]`, ...) so passing an already-owned buffer doesn't copy it.
-    pub async fn write_frame(&mut self, payload: impl Into<Bytes>) -> Result<(), FrameError> {
-        let payload = payload.into();
+    pub async fn write_frame(&mut self, payload: &[u8]) -> Result<(), FrameError> {
         if payload.len() as u64 > MAX_FRAME_LEN as u64 {
             return Err(FrameError::FrameTooLarge(payload.len() as u32));
         }

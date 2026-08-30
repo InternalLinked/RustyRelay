@@ -1,5 +1,6 @@
-use std::{thread, time::Duration};
+use std::{thread, time::{Duration, Instant}};
 
+use crate::networking::packethandler::AnyPacket;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -26,10 +27,12 @@ fn main() {
 
     thread::sleep(Duration::from_millis(1000));
 
-    for x in 0..1000000 {
-        let pkg = Ack::new(12, payload.clone());
+    for x in 0..1000000{
+        let start = Instant::now();
+        let pkg = Ack::new(12);
         //thread::sleep(Duration::from_millis(1000));
         handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
+        
     }
 
 

@@ -20,7 +20,7 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 pub struct TCPClientCore {
 
     client_handle: TCPClientHandle,
-    lobby_state: LobbyState
+    pub lobby_state: LobbyState
 
 }
 

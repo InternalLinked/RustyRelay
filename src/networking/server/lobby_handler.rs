@@ -28,7 +28,7 @@ pub enum LobbyState {
     /// Not currently hosting or a member of any lobby.
     Alone,
     /// Hosting the lobby identified by `lobby_id`.
-    Host { lobby_id: usize },
+    Host { lobby_id: usize, code: u64 },
     /// A client (non-host member) of the lobby identified by `lobby_id`, occupying
     /// seat `seat_id`.
     Client { lobby_id: usize, seat_id: usize },

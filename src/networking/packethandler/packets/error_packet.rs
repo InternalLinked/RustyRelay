@@ -1,11 +1,12 @@
 use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::packet::Packet, server::{lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io::{self};
 
 #[packet_macro::packet(2, true, false, false, 128, 64, 30)]
 pub struct RelayError {
-    code: u16,
+    code: u8,
 }
 
 impl RelayError {
@@ -18,4 +19,14 @@ impl RelayError {
         
         ClientCallback::Pass
     }
+}
+
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
+pub enum SendableError {
+    Kick,
+    AlreadyHostOrMember,
+
+
 }

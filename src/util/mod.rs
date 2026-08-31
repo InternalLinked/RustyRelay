@@ -14,7 +14,7 @@ static NOISE_PARAMS: OnceLock<NoiseParams> = OnceLock::new();
 
 pub fn noise_params() -> &'static NoiseParams {
     NOISE_PARAMS.get_or_init(|| {
-        "Noise_XX_25519_ChaChaPoly_BLAKE2s"
+        "Noise_XX_25519_AESGCM_SHA256"
             .parse()
             .expect("invalid Noise pattern string")
     })
@@ -41,24 +41,11 @@ pub fn packed_version_to_str(packed: u32) -> String {
     format!("{major}.{minor}.{patch}")
 }
 
-
-pub enum EncryptionTransport {
-    Handshake(HandshakeState),
-    Transport(TransportState)
-}
-
 pub enum EncryptionState {
     Unsecure,
     Handshake(snow::HandshakeState),
     Encrypted(snow::TransportState),
 }
-
-pub enum LobbyState {
-    Alone,
-    Host,
-    Client,
-}
-
 pub enum ServerCallback {
     /* Kill: Cuts the connection of client that returned the Kill enum */
     Kill,

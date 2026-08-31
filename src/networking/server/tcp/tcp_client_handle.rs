@@ -10,15 +10,15 @@ use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler, ServerEncryptionLayer};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::RelayError;
-use crate::util::{ClientContextInstruction, EncryptionTransport, RELAY_VERSION_BYTES, noise_params};
+use crate::networking::server::lobby_handler::LobbyState;
+use crate::util::{ClientContextInstruction};
 use crate::util::EncryptionState::{Handshake, Unsecure};
-use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState, LobbyState, ServerCallback}};
+use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::ServerCallback};
 
 #[derive(Clone)]
 pub struct TCPClientInstanceHandle {
     sender: Sender<ClientContextInstruction>,
     id: usize,
-    pub counter: usize, 
 }
 
 impl TCPClientInstanceHandle {
@@ -62,13 +62,15 @@ pub struct TCPClientInstanceCore {
 
     client_handle: TCPClientInstanceHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>,
+    pub counter: usize,
+    pub lobby_state: LobbyState
 
 }
 
 impl TCPClientInstanceCore {
     pub fn new(client_handle: TCPClientInstanceHandle) -> Self {
 
-        Self {client_handle, awaitable_cache: Slab::new()}
+        Self {client_handle, awaitable_cache: Slab::new(), lobby_state: LobbyState::Alone, counter: 0}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientInstanceHandle {
@@ -90,7 +92,7 @@ struct TCPClientContext {
 impl TCPClientContext {
     pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
-        let client_handle = TCPClientInstanceHandle { sender, id, counter: 0 };
+        let client_handle = TCPClientInstanceHandle { sender, id };
 
         let (read_half, write_half, encryption_handler) = ServerEncryptionLayer::new(stream).await.unwrap();
 
@@ -186,9 +188,10 @@ impl TCPClientContext {
                 }
 
             }
+
         }
 
-        println!("[Client] Close");
+        println!("[Server] Close");
         
     }
 }

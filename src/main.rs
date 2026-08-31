@@ -22,16 +22,16 @@ fn main() {
     
 
     let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
-    
-    let payload = Bytes::copy_from_slice(b"test");
 
     thread::sleep(Duration::from_millis(1000));
+    println!("Sending");
 
     for x in 0..1000000{
-        let start = Instant::now();
         let pkg = Ack::new(12);
         //thread::sleep(Duration::from_millis(1000));
-        handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)).unwrap();
+        let Ok(()) = handle.blocking_send(networking::packethandler::AnyPacket::AckPacket(pkg)) else {
+            break;
+        };
         
     }
 

@@ -4,7 +4,15 @@ use tokio::sync::oneshot;
 
 use crate::networking::server::StreamHandle;
 
-//This was AI genearted but under heavy observation by me and spicific instructions to save myself some time
+//This was part of AI genearted but under heavy observation by me and spicific instructions to save myself some time
+
+#[derive(PartialEq)]
+pub enum LobbyState {
+    Alone,
+    Host{lobby_id: usize},
+    Client{lobby_id: usize, seat_id: usize},
+}
+
 
 // ============================================================
 // Lobby<H>
@@ -110,7 +118,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let lobby = Lobby::new(host);
                 let lobby_slot = self.lobbies.insert(lobby);
                 let _ = reply.send(lobby_slot);
-            }
+            } 
 
             LobbyInstruction::Join {
                 lobby_slot,

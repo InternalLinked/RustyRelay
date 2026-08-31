@@ -170,6 +170,7 @@ impl TCPClientContext {
                     match TCPClientPacketHandler::handle_packet(&mut read_buffer.split_to(len), &mut core, &mut self.awaitable_cache).await {
                         ClientCallback::Kill => {
                             println!("[Client] Handler instructed to kill.");
+                            break;
                         },
                         _ => ()
                     }

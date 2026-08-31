@@ -11,15 +11,13 @@ pub struct Ack {
 
 impl Ack {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-        
+        client_core.counter += 1;
+
+        if client_core.counter % 10000 == 0 {
+            println!("Worked! {}", client_core.counter);
+        }
 
         let client_handle = client_core.get_client_handle();
-
-        client_handle.counter += 1;
-
-        if client_handle.counter % 10000 == 0 {
-            println!("Worked! {}", client_handle.counter);
-        }
 
         /*let mut packet = Ack::new(1);
         packet.set_nonce(self.get_nonce());

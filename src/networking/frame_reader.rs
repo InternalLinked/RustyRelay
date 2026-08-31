@@ -140,17 +140,3 @@ impl<W: AsyncWrite + Unpin> FramedWriter<W> {
         Ok(())
     }
 }
- 
-/// Splits any combined `AsyncRead + AsyncWrite` stream into an independent
-/// `FramedReader` / `FramedWriter` pair. For `TcpStream` specifically,
-/// prefer `TcpStream::into_split()` (used below) — it's lock-free, since a
-/// TCP socket's two directions are already independent at the OS level.
-/// `tokio::io::split` here is the generic fallback for stream types that
-/// don't offer their own split.
-pub fn split<S: AsyncRead + AsyncWrite + Unpin>(
-    stream: S,
-) -> (FramedReader<tokio::io::ReadHalf<S>>, FramedWriter<tokio::io::WriteHalf<S>>) {
-    let (r, w) = tokio::io::split(stream);
-    (FramedReader::new(r), FramedWriter::new(w))
-}
- 

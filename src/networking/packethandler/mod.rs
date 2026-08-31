@@ -45,6 +45,7 @@ macro_rules! register_packets {
                     match owned {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
+                            let result = p.on_trigger_server_tcp(client_core, lobby_manager).await;
                             if p.is_awaitable_server() {
                                 println!("Is awaitable_server");
 
@@ -55,8 +56,7 @@ macro_rules! register_packets {
                                     return ServerCallback::Kill;
                                 }
                             }
-
-                            p.on_trigger_server_tcp(client_core, lobby_manager).await
+                            return result;
                         },
                         )*
                         _ => ServerCallback::Kill,
@@ -70,6 +70,7 @@ macro_rules! register_packets {
                     match owned {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
+                            let result = p.on_trigger_client_tcp(client_core).await;
                             if p.is_awaitable_client() {
                                 if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
@@ -78,7 +79,8 @@ macro_rules! register_packets {
                                     return ClientCallback::Kill;
                                 }
                             }
-                            p.on_trigger_client_tcp(client_core).await
+                            return result;
+                            
                         },
                         )*
                         _ => ClientCallback::Kill,

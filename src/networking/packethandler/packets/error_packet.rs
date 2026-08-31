@@ -22,11 +22,27 @@ impl RelayError {
 }
 
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
+/// Errors that can be reported back to a caller as the result of a lobby operation.
+///
+/// These are returned inside the `Result` layer of each [`LobbyManagerHandle`] method's
+/// response (see those methods for how this combines with the outer `Option`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendableError {
+    /// Reserved for signaling a kick-related failure or notification. Not currently
+    /// produced by [`LobbyManager`] itself — see [`NotAuthorized`](SendableError::NotAuthorized)
+    /// for the "requester isn't the host" case.
     Kick,
     AlreadyHostOrMember,
-
-
+    /// The target lobby already has the maximum number of clients allowed
+    /// (`max_clients_per_lobby`), so [`Lobby::add_client`] refused to add another one.
+    LobbyFull,
+    /// The [`LobbyManager`] already has the maximum number of lobbies allowed
+    /// (`max_lobbies`), so no new lobby could be created.
+    MaxLobbiesExceded,
+    /// The `lobby_id`/join code supplied does not correspond to any currently active
+    /// lobby (either it never existed or has since been closed).
+    LobbyNotFound,
+    /// The requester attempted an action (e.g. kicking a client or closing a lobby)
+    /// that only the lobby's host is permitted to perform.
+    NotAuthorized,
 }

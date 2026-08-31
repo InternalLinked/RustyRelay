@@ -68,17 +68,16 @@ pub enum ClientContextInstruction {
     Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
 }
 
-pub fn random_string() -> String {
+pub fn random_code() -> u64 {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::rng();
-    (0..6)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARS.len());
-            CHARS[idx] as char
-        })
-        .collect()
+    let mut bytes = [0u8; 8];
+    for b in bytes.iter_mut() {
+        let idx = rng.random_range(0..CHARS.len());
+        *b = CHARS[idx];
+    }
+    u64::from_le_bytes(bytes)
 }
-
 pub fn generate_auth_token() -> [u8; 16] {
     let mut token = [0u8; 16];
     SysRng

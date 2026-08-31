@@ -34,7 +34,7 @@ impl TCPServerCore {
         loop {
 
             let (stream, address) = self.listener.accept().await?;
-            println!("New connection from {}", address);
+            println!("[Server] New connection from {}", address);
             TCPClientInstanceHandle::new(stream, self.next_id, self.lobby_manager.clone()).await;
             self.next_id += 1;
 

@@ -8,6 +8,7 @@ use crate::networking::packethandler::packet::DynamicPacket;
 use crate::networking::packethandler::packets::ack::Ack;
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::lobby::create::{CreateLobby, LobbyCreateSuccess};
+use crate::networking::packethandler::packets::lobby::join::{JoinLobby, LobbyJoinSuccess};
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle};
 use crate::util::{ClientCallback, EncryptionState, ServerCallback};
@@ -137,6 +138,8 @@ register_packets!(
     RelayError,
     CreateLobby,
     LobbyCreateSuccess,
+    JoinLobby,
+    LobbyJoinSuccess,
 );
 
 

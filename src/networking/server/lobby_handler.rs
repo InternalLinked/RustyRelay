@@ -138,12 +138,14 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// The manager resolves `code` to a `lobby_id` via its `code_map` before adding
     /// the client.
     ///
-    /// Replies with the new client's seat id, or [`SendableError::LobbyNotFound`] (if
-    /// `code` isn't recognized) / [`SendableError::LobbyFull`] as appropriate.
+    /// Replies with `(lobby_id, seat_id)` on success — `lobby_id` being the resolved
+    /// lobby, `seat_id` the client's newly assigned seat — or
+    /// [`SendableError::LobbyNotFound`] (if `code` isn't recognized) /
+    /// [`SendableError::LobbyFull`] as appropriate.
     Join {
         code: u64,
         client: H,
-        reply: oneshot::Sender<Result<usize, SendableError>>,
+        reply: oneshot::Sender<Result<(usize, usize), SendableError>>,
     },
     /// Remove the client at `seat_id` from the lobby identified by `lobby_id`.
     ///
@@ -261,7 +263,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 /* Resolve the join code to a lobby id, then look up the lobby itself */
                 let result = match self.code_map.get(&code) {
                     Some(&lobby_id) => match self.lobbies.get_mut(lobby_id) {
-                        Some(lobby) => lobby.add_client(client),
+                        Some(lobby) => lobby.add_client(client).map(|seat_id| (lobby_id, seat_id)),
                         None => Err(SendableError::LobbyNotFound),
                     },
                     None => Err(SendableError::LobbyNotFound),
@@ -398,7 +400,10 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
         response.await.expect("LobbyManager dropped reply channel")
     }
 
-    /// Adds `client` to the lobby whose join code is `code`.
+        /// Adds `client` to the lobby whose join code is `code`.
+    ///
+    /// Returns `(lobby_id, seat_id)` on success — `lobby_id` being the resolved
+    /// lobby, `seat_id` the client's newly assigned seat.
     ///
     /// # Errors
     ///
@@ -409,7 +414,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn join(&self, code: u64, client: H) -> Result<usize, SendableError> {
+    pub async fn join(&self, code: u64, client: H) -> Result<(usize, usize), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender

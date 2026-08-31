@@ -95,7 +95,6 @@ impl ClientEncryptionLayer {
     }
 
     async fn do_ack(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
-        println!("[Client] doing handshake");
         let params: NoiseParams = noise_params().clone();
 
         let initiator_keys = Builder::new(params.clone()).generate_keypair().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)).map_err(|_| ())?;
@@ -114,7 +113,6 @@ impl ClientEncryptionLayer {
 
     pub async fn handle_ack(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
 
-        println!("[Client] Handle handshake");
         let old_state = std::mem::replace(&mut self.encryption_handler.encryption_state, EncryptionState::Unsecure);
 
         let EncryptionState::Handshake(mut handshake) = old_state else {
@@ -132,20 +130,17 @@ impl ClientEncryptionLayer {
 
         writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
 
-        println!("[Client] Handle");
         Ok(())
 
     }
 
     pub async fn handle_check(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
 
-        println!("[Client] Waiting for check");
 
         let frame = reader.read_frame().await.map_err(|_| ())?;
         let len = self.encryption_handler.decrypt(&frame, &mut self.encryption_buffer).map_err(|_| ())?;
 
         if len < 4 || u32::from_be_bytes(self.encryption_buffer[..4].try_into().unwrap()) != 0x1337 {
-            println!("[Client] Encryption check was not successfull");
             return Err(());
         }
 
@@ -180,7 +175,6 @@ impl ServerEncryptionLayer {
     }
 
     async fn handle_handshake(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
-        println!("[Server] trying to read frame");
         let client_public_key = reader.read_frame().await.map_err(|_| ())?;
 
         let params = noise_params().clone();
@@ -200,14 +194,12 @@ impl ServerEncryptionLayer {
         self.encryption_handler.encryption_state = EncryptionState::Handshake(responder);
 
         writer.write_frame(&self.encryption_buffer[..len]).await.map_err(|_| ())?;
-        println!("[Server] Send ack");
 
         Ok(())
     }
 
     async fn handle_ack(&mut self, reader: &mut FramedReader<OwnedReadHalf>, writer: &mut FramedWriter<OwnedWriteHalf>) -> Result<(), ()> {
 
-        println!("[Server] Handling ack back");
         let old_state = std::mem::replace(&mut self.encryption_handler.encryption_state, EncryptionState::Unsecure);
 
         let EncryptionState::Handshake(mut handshake) = old_state else {

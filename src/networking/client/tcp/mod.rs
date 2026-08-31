@@ -12,6 +12,7 @@ use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, Owne
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::TCPClientPacketHandler;
+use crate::networking::server::lobby_handler::LobbyState;
 use crate::util::{ClientCallback, ClientContextInstruction, RELAY_VERSION_BYTES, client_runtime, noise_params};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
 
@@ -19,13 +20,14 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 pub struct TCPClientCore {
 
     client_handle: TCPClientHandle,
+    lobby_state: LobbyState
 
 }
 
 impl TCPClientCore {
     pub fn new(client_handle: TCPClientHandle) -> Self {
 
-        Self {client_handle}
+        Self {client_handle, lobby_state: LobbyState::Alone}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientHandle {

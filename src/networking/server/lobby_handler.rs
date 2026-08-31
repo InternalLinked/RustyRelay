@@ -379,24 +379,37 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
 
     /// Creates a new lobby hosted by `host`.
     ///
-    /// Returns `Some(Ok((lobby_id, code)))` on success, `Some(Err(MaxLobbiesExceded))`
-    /// if the manager is at capacity, or `None` if the manager could not be reached.
-    pub async fn create(&self, host: H) -> Option<Result<(usize, u64), SendableError>> {
+    /// # Errors
+    ///
+    /// Returns [`SendableError::MaxLobbiesExceded`] if the manager is at capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn create(&self, host: H) -> Result<(usize, u64), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
             .send(LobbyInstruction::Create { host, reply })
             .await
-            .ok()?;
+            .expect("LobbyManager task is not running");
 
-        response.await.ok()
+        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Adds `client` to the lobby whose join code is `code`.
     ///
-    /// Returns `Some(Ok(seat_id))` on success, `Some(Err(LobbyNotFound | LobbyFull))`
-    /// on a known failure, or `None` if the manager could not be reached.
-    pub async fn join(&self, code: u64, client: H) -> Option<Result<usize, SendableError>> {
+    /// # Errors
+    ///
+    /// Returns [`SendableError::LobbyNotFound`] if `code` isn't recognized, or
+    /// [`SendableError::LobbyFull`] if the lobby is at capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn join(&self, code: u64, client: H) -> Result<usize, SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -406,16 +419,22 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
                 reply,
             })
             .await
-            .ok()?;
+            .expect("LobbyManager task is not running");
 
-        response.await.ok()
+        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Removes the client at `seat_id` from the lobby identified by `lobby_id`.
     ///
-    /// Returns `Some(Ok(()))` on success, `Some(Err(LobbyNotFound))` if the lobby
-    /// doesn't exist, or `None` if the manager could not be reached.
-    pub async fn leave(&self, lobby_id: usize, seat_id: usize) -> Option<Result<(), SendableError>> {
+    /// # Errors
+    ///
+    /// Returns [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn leave(&self, lobby_id: usize, seat_id: usize) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -425,23 +444,29 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
                 reply,
             })
             .await
-            .ok()?;
+            .expect("LobbyManager task is not running");
 
-        response.await.ok()
+        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Removes the client at `target_seat` from the lobby identified by `lobby_id`,
     /// on behalf of `requester_id`.
     ///
-    /// Returns `Some(Ok(()))` on success, `Some(Err(NotAuthorized))` if `requester_id`
-    /// isn't the host, `Some(Err(LobbyNotFound))` if the lobby doesn't exist, or `None`
-    /// if the manager could not be reached.
+    /// # Errors
+    ///
+    /// Returns [`SendableError::NotAuthorized`] if `requester_id` isn't the host, or
+    /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
     pub async fn kick(
         &self,
         lobby_id: usize,
         requester_id: usize,
         target_seat: usize,
-    ) -> Option<Result<(), SendableError>> {
+    ) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -452,21 +477,27 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
                 reply,
             })
             .await
-            .ok()?;
+            .expect("LobbyManager task is not running");
 
-        response.await.ok()
+        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Closes the lobby identified by `lobby_id`, on behalf of `requester_id`.
     ///
-    /// Returns `Some(Ok(()))` on success, `Some(Err(NotAuthorized))` if `requester_id`
-    /// isn't the host, `Some(Err(LobbyNotFound))` if the lobby doesn't exist, or `None`
-    /// if the manager could not be reached.
+    /// # Errors
+    ///
+    /// Returns [`SendableError::NotAuthorized`] if `requester_id` isn't the host, or
+    /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
     pub async fn close(
         &self,
         lobby_id: usize,
         requester_id: usize,
-    ) -> Option<Result<(), SendableError>> {
+    ) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -476,8 +507,8 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
                 reply,
             })
             .await
-            .ok()?;
+            .expect("LobbyManager task is not running");
 
-        response.await.ok()
+        response.await.expect("LobbyManager dropped reply channel")
     }
 }

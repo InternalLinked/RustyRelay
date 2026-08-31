@@ -34,13 +34,23 @@ impl CreateLobby {
             return ServerCallback::Pass;
         }
 
-        /* If the client is Alone we can create a lobby */
-        let Some(id) = lobby_manager.create(client_core.get_client_handle().clone()).await else {
-            
+        /* If the client is alone we can create a lobby */
+        match lobby_manager.create(client_core.get_client_handle().clone()).await {
+            Ok((lobby_id, lobby_code)) => {
 
+                client_core.lobby_state = LobbyState::Host { lobby_id }
 
-            return ServerCallback::Pass;
-        };
+            },
+            Err(e) => {
+                if !self.is_awaitable_client() {
+                    return ServerCallback::Pass;
+                }
+
+                let mut error_packet = RelayError::new(e as u8);
+                error_packet.set_awaitable_client();
+                error_packet.set_nonce(self.get_nonce());
+            }
+        }
 
 
 

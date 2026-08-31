@@ -51,7 +51,6 @@ macro_rules! register_packets {
                                 if let Some(oneshot) = client_core.get_awaitable_cache().try_remove(p.get_nonce() as usize) {
 
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
-                                    return ServerCallback::Pass;
                                 }else {
                                     return ServerCallback::Kill;
                                 }
@@ -74,7 +73,7 @@ macro_rules! register_packets {
                             if p.is_awaitable_client() {
                                 if let Some(oneshot) = awaitable_cache.try_remove(p.get_nonce() as usize) {
                                     let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
-                                    return ClientCallback::Pass;
+                                    
                                 }else {
                                     return ClientCallback::Kill;
                                 }

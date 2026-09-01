@@ -1,5 +1,6 @@
 use std::{thread, time::{Duration, Instant}};
 
+use crate::networking::packethandler::packets::lobby::leave::LobbyLeave;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -80,6 +81,15 @@ fn main() {
         AnyPacket::RelayErrorPacket(code) => panic!("got error {}", code.read_code()),
         _ => panic!("Unexpected packet"),
     } 
+
+
+
+    let packet = LobbyLeave::new();
+
+    let _ = handle.blocking_send(AnyPacket::LobbyLeavePacket(packet));
+
+
+    thread::sleep(Duration::from_secs(1));
 
     let packet = LobbyJoin::new(code);
 

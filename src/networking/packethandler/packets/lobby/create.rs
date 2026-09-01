@@ -26,13 +26,14 @@ impl LobbyCreate {
         match lobby_manager.create(client_core.get_client_handle().clone()).await {
             Ok((lobby_id, code)) => {
                 client_core.lobby_state = LobbyState::Host { lobby_id, code };
-                if !self.is_awaitable_client() {
-                    return ServerCallback::Pass;
-                }
 
                 let mut packet = LobbyCreateSuccess::new(lobby_id as u64, code);
-                packet.set_awaitable_client();
-                packet.set_nonce(self.get_nonce());
+                if self.is_awaitable_client() {
+                    packet.set_awaitable_client();
+                    packet.set_nonce(self.get_nonce());
+                }
+
+
                 client_core.get_client_handle().send(LobbyCreateSuccessPacket(packet)).await;
 
 

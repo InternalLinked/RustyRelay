@@ -23,13 +23,12 @@ impl LobbyJoin {
 
                 client_core.lobby_state = LobbyState::Client { lobby_id, seat_id };
 
-                if !self.is_awaitable_client() {
-                    return ServerCallback::Pass;
+                let mut packet = LobbyJoinSuccess::new(lobby_id as u64, seat_id as u64);
+                if self.is_awaitable_client() {
+                    packet.set_awaitable_client();
+                    packet.set_nonce(self.get_nonce());
                 }
 
-                let mut packet = LobbyJoinSuccess::new(lobby_id as u64, seat_id as u64);
-                packet.set_awaitable_client();
-                packet.set_nonce(self.get_nonce());
                 client_core.get_client_handle().send(LobbyJoinSuccessPacket(packet)).await;
 
             },

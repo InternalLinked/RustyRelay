@@ -54,7 +54,6 @@ impl LobbyLeaveSuccess {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
-        println!("successfully left");
         client_core.lobby_state = LobbyState::Alone;
 
         ClientCallback::Pass

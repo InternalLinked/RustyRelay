@@ -204,7 +204,9 @@ impl TCPClientContext {
 
         }
 
-        println!("[Server] Close");
+
+
+        println!("[Server] Id: {} closed", core.client_handle.get_id());
         
     }
 }

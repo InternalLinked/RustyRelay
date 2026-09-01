@@ -106,6 +106,8 @@ fn main() {
         _ => panic!("Unexpected packet"),
     } 
 
+    handle.close();
+
     println!("Done");
 
     loop {

@@ -205,6 +205,18 @@ impl TCPClientContext {
         }
 
 
+        /* Cleaing up referenced lobby to the client */
+
+        match core.lobby_state {
+            
+            LobbyState::Alone => (),
+            LobbyState::Host { lobby_id, code } => {
+                todo!("Closing lobby");
+            },
+            LobbyState::Client { lobby_id, seat_id } => {
+                let _ = self.lobby_manager.leave(lobby_id, seat_id).await;
+            },
+        }
 
         println!("[Server] Id: {} closed", core.client_handle.get_id());
         

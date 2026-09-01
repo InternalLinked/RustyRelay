@@ -57,6 +57,7 @@ impl LobbyClientKick {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
+
         client_core.lobby_state = LobbyState::Alone;
 
         ClientCallback::Pass

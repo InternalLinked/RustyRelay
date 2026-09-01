@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{self, AckPacket, RelayErrorPacket}, packet::Packet, packets::error_packet::RelayError}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{self, AckPacket, RelayErrorPacket}, packet::Packet, packets::error_packet::{RelayError, SendableError}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self};
@@ -30,7 +30,20 @@ impl LobbyLeave {
                 return ServerCallback::Pass;
             }
 
-            _ => ()
+            LobbyState::Alone => {
+                if self.is_awaitable_client() {
+                    let mut error = RelayError::new(SendableError::NoMember as u8);
+                    error.set_awaitable_client();
+                    error.set_nonce(self.get_nonce());
+                    client_core.get_client_handle().send(AnyPacket::RelayErrorPacket(error)).await;
+                }
+
+                
+            },
+
+            LobbyState::Host { lobby_id, code } => {
+                todo!("Handle leave call by host")
+            }
         }
 
         ServerCallback::Pass

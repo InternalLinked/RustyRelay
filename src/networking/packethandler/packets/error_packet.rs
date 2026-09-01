@@ -47,4 +47,7 @@ pub enum SendableError {
     NotAuthorized,
     /// The lobby was found, but the given seat was not occupied by any client.
     SeatNotFound,
+    /// If the client is not hosting or part of a lobby to perfom action
+    NoMember
+
 }

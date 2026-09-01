@@ -68,12 +68,10 @@ fn main() {
     let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
 
     let packet = LobbyJoin::new(code);
-    let mut seat_id: usize = 0;
 
     match handle.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
 
         AnyPacket::LobbyJoinSuccessPacket(packet) => {
-            seat_id = packet.read_seat_id() as usize;
             println!("Joined lobby:\nLobby_Id: {}, Seat_Id: {}", packet.read_lobby_id(), packet.read_seat_id());
 
 
@@ -84,30 +82,6 @@ fn main() {
     } 
 
 
-    let kickpacket= LobbyKick::new(seat_id as u64);
-
-    host.blocking_send(AnyPacket::LobbyKickPacket(kickpacket));
-    
-
-
-    thread::sleep(Duration::from_secs(1));
-
-    let packet = LobbyJoin::new(code);
-
-    match handle.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
-
-        AnyPacket::LobbyJoinSuccessPacket(packet) => {
-
-            println!("Joined lobby:\nLobby_Id: {}, Seat_Id: {}", packet.read_lobby_id(), packet.read_seat_id());
-
-
-
-        }
-        AnyPacket::RelayErrorPacket(code) => panic!("got error {}", code.read_code()),
-        _ => panic!("Unexpected packet"),
-    } 
-
-    handle.close();
 
     println!("Done");
 

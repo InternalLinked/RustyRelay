@@ -13,6 +13,7 @@ use slab::Slab;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 
+use crate::networking::packethandler::AnyPacket;
 use crate::networking::packethandler::packets::error_packet::SendableError;
 use crate::networking::server::StreamHandle;
 use crate::util::random_code;
@@ -77,6 +78,26 @@ impl<H: StreamHandle> Lobby<H> {
     /// accept any more.
     pub fn is_full(&self) -> bool {
         self.clients.len() >= self.max_clients
+    }
+
+     /// Sends `packet` to every client in this lobby (not the host).
+    ///
+    /// # TODO
+    ///
+    /// Placeholder — actual sending mechanics not yet implemented.
+    pub fn broadcast(&mut self, packet: AnyPacket) {
+        for (_seat_id, _client) in self.clients.iter_mut() {
+            // TODO: actually send `packet` to `_client`
+        }
+    }
+
+    /// Sends `packet` to this lobby's host only.
+    ///
+    /// # TODO
+    ///
+    /// Placeholder — actual sending mechanics not yet implemented.
+    pub fn send_host(&mut self, packet: AnyPacket) {
+        // TODO: actually send `packet` to `self.host`
     }
 
     /// Attempts to add `client` to this lobby's client slab, returning its assigned
@@ -168,6 +189,25 @@ pub enum LobbyInstruction<H: StreamHandle> {
         requester_id: usize,
         target_seat: usize,
         reply: oneshot::Sender<Result<H, SendableError>>,
+    },
+    /// Send `packet` to every client in the lobby identified by `lobby_id`, excluding
+    /// the host by design.
+    ///
+    /// Replies with `Ok(())` on success, or [`SendableError::LobbyNotFound`] if the
+    /// lobby doesn't exist.
+    Broadcast {
+        lobby_id: usize,
+        packet: AnyPacket,
+        reply: oneshot::Sender<Result<(), SendableError>>,
+    },
+    /// Send `packet` to only the host of the lobby identified by `lobby_id`.
+    ///
+    /// Replies with `Ok(())` on success, or [`SendableError::LobbyNotFound`] if the
+    /// lobby doesn't exist.
+    SendHost {
+        lobby_id: usize,
+        packet: AnyPacket,
+        reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Close (remove) the lobby identified by `lobby_id`, on behalf of `requester_id`.
     ///
@@ -273,6 +313,36 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let _ = reply.send(result);
             }
 
+            LobbyInstruction::Broadcast {
+                lobby_id,
+                packet,
+                reply,
+            } => {
+                let result = match self.lobbies.get_mut(lobby_id) {
+                    Some(lobby) => {
+                        lobby.broadcast(packet);
+                        Ok(())
+                    }
+                    None => Err(SendableError::LobbyNotFound),
+                };
+                let _ = reply.send(result);
+            }
+
+            LobbyInstruction::SendHost {
+                lobby_id,
+                packet,
+                reply,
+            } => {
+                let result = match self.lobbies.get_mut(lobby_id) {
+                    Some(lobby) => {
+                        lobby.send_host(packet);
+                        Ok(())
+                    }
+                    None => Err(SendableError::LobbyNotFound),
+                };
+                let _ = reply.send(result);
+            }
+
             LobbyInstruction::Leave {
                 lobby_id,
                 seat_id,
@@ -288,7 +358,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let _ = reply.send(result);
             }
 
-                        LobbyInstruction::Kick {
+            LobbyInstruction::Kick {
                 lobby_id,
                 requester_id,
                 target_seat,
@@ -401,7 +471,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
         response.await.expect("LobbyManager dropped reply channel")
     }
 
-        /// Adds `client` to the lobby whose join code is `code`.
+    /// Adds `client` to the lobby whose join code is `code`.
     ///
     /// Returns `(lobby_id, seat_id)` on success — `lobby_id` being the resolved
     /// lobby, `seat_id` the client's newly assigned seat.
@@ -483,6 +553,57 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
                 lobby_id,
                 requester_id,
                 target_seat,
+                reply,
+            })
+            .await
+            .expect("LobbyManager task is not running");
+
+        response.await.expect("LobbyManager dropped reply channel")
+    }
+
+    /// Sends `packet` to every client in the lobby identified by `lobby_id`,
+    /// excluding the host.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn broadcast(&self, lobby_id: usize, packet: AnyPacket) -> Result<(), SendableError> {
+        let (reply, response) = oneshot::channel();
+
+        self.sender
+            .send(LobbyInstruction::Broadcast {
+                lobby_id,
+                packet,
+                reply,
+            })
+            .await
+            .expect("LobbyManager task is not running");
+
+        response.await.expect("LobbyManager dropped reply channel")
+    }
+
+    /// Sends `packet` to only the host of the lobby identified by `lobby_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn send_host(&self, lobby_id: usize, packet: AnyPacket) -> Result<(), SendableError> {
+        let (reply, response) = oneshot::channel();
+
+        self.sender
+            .send(LobbyInstruction::SendHost {
+                lobby_id,
+                packet,
                 reply,
             })
             .await

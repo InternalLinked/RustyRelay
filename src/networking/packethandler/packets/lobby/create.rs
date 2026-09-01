@@ -5,11 +5,11 @@ use tokio::sync::broadcast::error::SendError;
 use std::io::{self};
 
 #[packet_macro::packet(3, true, false, false, 128, 64, 30)]
-pub struct CreateLobby {
+pub struct LobbyCreate {
     
 }
 
-impl CreateLobby {
+impl LobbyCreate {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         /* Handeling create lobby */
         /*Check if the client is already a host or a member of a lobby */
@@ -17,18 +17,7 @@ impl CreateLobby {
             
 
 
-            /* If so check if the client acutally wants a response back */
-            if !self.is_awaitable_client() {
-                return ServerCallback::Pass;
-            }
-
-            /* Sending a response back that the client is already a host or a member */
-
-            let mut error_packet = RelayError::new(SendableError::AlreadyHostOrMember as u8);
-            error_packet.set_awaitable_client();
-            error_packet.set_nonce(self.get_nonce());
-
-            client_core.get_client_handle().send(RelayErrorPacket(error_packet)).await;
+            client_core.send_client_error(self, SendableError::AlreadyHostOrMember).await;
 
             return ServerCallback::Pass;
         }
@@ -50,16 +39,7 @@ impl CreateLobby {
 
             },
             Err(e) => {
-                if !self.is_awaitable_client() {
-                    return ServerCallback::Pass;
-                }
-
-                let mut error_packet = RelayError::new(e as u8);
-                error_packet.set_awaitable_client();
-                error_packet.set_nonce(self.get_nonce());
-                client_core.get_client_handle().send(RelayErrorPacket(error_packet)).await;
-
-
+                client_core.send_client_error(self, e).await;
             }
         }
 

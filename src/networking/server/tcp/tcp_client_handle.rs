@@ -9,7 +9,7 @@ use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, Owne
 use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler, ServerEncryptionLayer};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
-use crate::networking::packethandler::packets::error_packet::RelayError;
+use crate::networking::packethandler::packets::error_packet::{RelayError, SendableError};
 use crate::networking::server::lobby_handler::LobbyState;
 use crate::util::{ClientContextInstruction};
 use crate::util::EncryptionState::{Handshake, Unsecure};
@@ -79,6 +79,19 @@ impl TCPClientInstanceCore {
 
     pub fn get_awaitable_cache(&mut self) -> &mut Slab<oneshot::Sender<AnyPacket>> {
         &mut self.awaitable_cache
+    }
+
+    /* Takes packet and the error to send. The function automatically checks if the client expects a response
+    if so it sends the errorcode back */
+    pub async fn send_client_error(&mut self, packet: &impl Packet, error: SendableError) {
+        if !packet.is_awaitable_client() {
+            return
+        }
+
+        let mut error_packet = RelayError::new(error as u8);
+        error_packet.set_awaitable_client();
+        error_packet.set_nonce(packet.get_nonce());
+        let _ = &self.get_client_handle().send(AnyPacket::RelayErrorPacket(error_packet)).await;
     }
 
 }

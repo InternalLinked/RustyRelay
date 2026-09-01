@@ -10,6 +10,7 @@ use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler, ServerEncryptionLayer};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::{RelayError, SendableError};
+use crate::networking::packethandler::packets::lobby::kick::LobbyClientKick;
 use crate::networking::server::lobby_handler::LobbyState;
 use crate::util::{ClientContextInstruction};
 use crate::util::EncryptionState::{Handshake, Unsecure};
@@ -24,6 +25,11 @@ pub struct TCPClientInstanceHandle {
 impl TCPClientInstanceHandle {
     pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
+    }
+
+    /* Is used when a client gets kicked */
+    pub async fn reset_lobby_state(&mut self) {
+        self.sender.send(ClientContextInstruction::ResetLobbyState).await;    
     }
 
 }
@@ -192,6 +198,14 @@ impl TCPClientContext {
                                 break;
                             };
 
+                        }
+
+                        ClientContextInstruction::ResetLobbyState => {
+                            core.lobby_state = LobbyState::Alone;
+
+                            let packet = LobbyClientKick::new();
+                            core.get_client_handle().send(AnyPacket::LobbyClientKickPacket(packet)).await;
+                            
                         }
 
                         ClientContextInstruction::Close => {

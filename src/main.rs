@@ -1,6 +1,7 @@
 use std::{thread, time::{Duration, Instant}};
 
 use crate::networking::packethandler::packets::lobby::leave::LobbyLeave;
+use crate::networking::packethandler::packets::lobby::kick::LobbyKick;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -21,7 +22,7 @@ fn main() {
 
     
 
-    let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
+    let mut host = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
 
     thread::sleep(Duration::from_millis(1000));
     println!("Sending");
@@ -29,7 +30,7 @@ fn main() {
     let packet = LobbyCreate::new();
 
     let start = Instant::now();
-    let code: u64 = match handle.blocking_send_awaitable(AnyPacket::LobbyCreatePacket(packet)).unwrap() {
+    let code: u64 = match host.blocking_send_awaitable(AnyPacket::LobbyCreatePacket(packet)).unwrap() {
         AnyPacket::LobbyCreateSuccessPacket(success) => {
             let bytes = success.read_lobby_code().to_le_bytes();
             let code = str::from_utf8(&bytes).unwrap();
@@ -67,12 +68,12 @@ fn main() {
     let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
 
     let packet = LobbyJoin::new(code);
-
+    let mut seat_id: usize = 0;
 
     match handle.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
 
         AnyPacket::LobbyJoinSuccessPacket(packet) => {
-
+            seat_id = packet.read_seat_id() as usize;
             println!("Joined lobby:\nLobby_Id: {}, Seat_Id: {}", packet.read_lobby_id(), packet.read_seat_id());
 
 
@@ -83,10 +84,10 @@ fn main() {
     } 
 
 
+    let kickpacket= LobbyKick::new(seat_id as u64);
 
-    let packet = LobbyLeave::new();
-
-    let _ = handle.blocking_send(AnyPacket::LobbyLeavePacket(packet));
+    host.blocking_send(AnyPacket::LobbyKickPacket(kickpacket));
+    
 
 
     thread::sleep(Duration::from_secs(1));

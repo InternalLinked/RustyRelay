@@ -159,13 +159,15 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Remove the client at `target_seat` from the lobby identified by `lobby_id`,
     /// on behalf of `requester_id`.
     ///
-    /// Replies with [`SendableError::NotAuthorized`] if `requester_id` is not the
-    /// lobby's host, or [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    /// Replies with the removed client's handle on success,
+    /// [`SendableError::NotAuthorized`] if `requester_id` is not the lobby's host,
+    /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist, or
+    /// [`SendableError::SeatNotFound`] if `target_seat` was not occupied.
     Kick {
         lobby_id: usize,
         requester_id: usize,
         target_seat: usize,
-        reply: oneshot::Sender<Result<(), SendableError>>,
+        reply: oneshot::Sender<Result<H, SendableError>>,
     },
     /// Close (remove) the lobby identified by `lobby_id`, on behalf of `requester_id`.
     ///
@@ -286,7 +288,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let _ = reply.send(result);
             }
 
-            LobbyInstruction::Kick {
+                        LobbyInstruction::Kick {
                 lobby_id,
                 requester_id,
                 target_seat,
@@ -297,8 +299,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                         if !lobby.is_host(requester_id) {
                             Err(SendableError::NotAuthorized)
                         } else {
-                            lobby.remove_client(target_seat);
-                            Ok(())
+                            lobby.remove_client(target_seat).ok_or(SendableError::SeatNotFound)
                         }
                     }
                     None => Err(SendableError::LobbyNotFound),
@@ -457,10 +458,13 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     /// Removes the client at `target_seat` from the lobby identified by `lobby_id`,
     /// on behalf of `requester_id`.
     ///
+    /// Returns the removed client's handle on success.
+    ///
     /// # Errors
     ///
-    /// Returns [`SendableError::NotAuthorized`] if `requester_id` isn't the host, or
-    /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    /// Returns [`SendableError::NotAuthorized`] if `requester_id` isn't the host,
+    /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist, or
+    /// [`SendableError::SeatNotFound`] if `target_seat` was not occupied by any client.
     ///
     /// # Panics
     ///
@@ -471,7 +475,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
         lobby_id: usize,
         requester_id: usize,
         target_seat: usize,
-    ) -> Result<(), SendableError> {
+    ) -> Result<H, SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender

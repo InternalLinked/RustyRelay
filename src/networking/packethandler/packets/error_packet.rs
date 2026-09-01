@@ -45,4 +45,6 @@ pub enum SendableError {
     /// The requester attempted an action (e.g. kicking a client or closing a lobby)
     /// that only the lobby's host is permitted to perform.
     NotAuthorized,
+    /// The lobby was found, but the given seat was not occupied by any client.
+    SeatNotFound,
 }

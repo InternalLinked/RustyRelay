@@ -223,7 +223,8 @@ impl TCPClientContext {
 
                         ClientContextInstruction::Close => {
                             break;
-                        }
+                        },
+                        _ => ()
                     }
                 }
 

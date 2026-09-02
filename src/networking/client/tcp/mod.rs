@@ -44,12 +44,19 @@ pub struct TCPClientHandle {
 
 impl StreamHandle for TCPClientHandle {
 
-    async fn send(&mut self, anypacket: AnyPacket) {
+    async fn send(&self, anypacket: AnyPacket) {
         if self.sender.send(ClientContextInstruction::Packet {anypacket}).await.is_err() {
             todo!("Handle closed client");
         }
     }
-    async fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
+
+    async fn send_raw(&self, packet: Bytes) {
+        if self.sender.blocking_send(ClientContextInstruction::RawPacket { raw_packet: packet }).is_err() {
+            todo!("Handle closed client");
+        }
+    }
+
+    async fn send_awaitable(&self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
         let (sender, r) = oneshot::channel::<AnyPacket>();
 
 
@@ -59,7 +66,7 @@ impl StreamHandle for TCPClientHandle {
         r.await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    async fn close(&mut self) {
+    async fn close(&self) {
         if self.sender.send(ClientContextInstruction::Close).await.is_err() {
             todo!("Handle closed client");
         }
@@ -165,7 +172,7 @@ impl TCPClientContext {
                     };
 
                     let Ok(len) = encryption_handler.decrypt(&buffer, &mut read_buffer) else {
-                        println!("[Client] Encryption handler");
+                        println!("[Client] Decryption error");
                         break;
                     };
 
@@ -221,10 +228,16 @@ impl TCPClientContext {
 
                         }
 
+                        ClientContextInstruction::RawPacket {raw_packet} => {
+
+                        }, 
+
                         ClientContextInstruction::Close => {
                             break;
                         },
+
                         _ => ()
+                        
                     }
                 }
 

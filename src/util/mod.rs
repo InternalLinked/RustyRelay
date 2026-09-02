@@ -67,6 +67,7 @@ pub enum ClientContextInstruction {
     Packet {anypacket: AnyPacket },
     Awaitable {anypacket: AnyPacket, sender: oneshot::Sender<AnyPacket>},
     ResetLobbyState,
+    RawPacket {raw_packet: Bytes}
 }
 
 pub fn random_code() -> u64 {

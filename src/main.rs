@@ -1,7 +1,8 @@
 use std::{thread, time::{Duration, Instant}};
 
-use crate::networking::packethandler::packets::lobby::leave::LobbyLeave;
+use crate::networking::packethandler::{AnyPacket::LobbyBroadcastPacket, packets::lobby::leave::LobbyLeave};
 use crate::networking::packethandler::packets::lobby::kick::LobbyKick;
+use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -82,6 +83,17 @@ fn main() {
     } 
 
 
+    let dynamic = Bytes::copy_from_slice(b"test");
+
+    let packet = LobbyBroadcast::new(dynamic.clone());
+
+    handle.blocking_send(LobbyBroadcastPacket(packet));
+
+    let packet = LobbyBroadcast::new(dynamic.clone());
+    handle.blocking_send(LobbyBroadcastPacket(packet));
+
+    let packet = LobbyBroadcast::new(dynamic.clone());
+    handle.blocking_send(LobbyBroadcastPacket(packet));
 
     println!("Done");
 

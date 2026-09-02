@@ -39,7 +39,7 @@ impl Parse for PacketProperties {
             max_cache: max_cache.base10_parse::<usize>()?,
             cache_threshold: cache_threshold.base10_parse::<usize>()?,
             timeout: timeout.base10_parse::<usize>()?,
-           
+
         })
     }
 }
@@ -246,12 +246,19 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
         prepend_field(&mut ast, quote::quote! { dynamic_buffer: Bytes });
     }
 
-    // `, dynamic_buffer` appended to the `Self { .. }` literals below.
-    let dynamic_buffer_field_init = if is_dynamic {
-        quote::quote! { , dynamic_buffer }
-    } else {
-        quote::quote! {}
-    };
+    // `self_bytes` is synthetic, like `dynamic_buffer` above -- not part of
+    // the wire format, so it's added directly to the struct rather than
+    // going through `plan_for_field` (which would try to read/write it as
+    // a wire field and blow up the capacity/layout). It holds the raw
+    // bytes of the *entire* packet (id + fixed fields + dynamic payload,
+    // if any), exactly as handed to `from()`, or as produced by the last
+    // call to `encode()` for packets built via `new()`. Backing this with
+    // `Bytes` (an `Arc`-backed, refcounted view) means storing/returning it
+    // is just a refcount bump -- no memcpy of packet contents.
+    prepend_field(&mut ast, quote::quote! { self_bytes: Bytes });
+
+    // `, self_bytes` appended to the `Self { .. }` literals below.
+    let self_bytes_field_init = quote::quote! { , self_bytes };
 
     // Splits `dynamic_buffer` off the tail of the incoming buffer in
     // `from()`. By this point all fixed-size fields have been consumed via
@@ -293,6 +300,13 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
                 &self.dynamic_buffer
             }
         }
+    } else {
+        quote::quote! {}
+    };
+
+    // `, dynamic_buffer` appended to the `Self { .. }` literals below.
+    let dynamic_buffer_field_init = if is_dynamic {
+        quote::quote! { , dynamic_buffer }
     } else {
         quote::quote! {}
     };
@@ -394,11 +408,25 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #(#field_writers)*
                 #dynamic_buffer_encode
 
-                Ok(buf.split().freeze())
+                let encoded = buf.split().freeze();
+                // Keep `self_bytes` truthful for packets built via `new()`
+                // and then encoded -- `.clone()` here is a refcount bump,
+                // not a copy, since `encoded` is already an owned `Bytes`.
+                self.self_bytes = encoded.clone();
+                Ok(encoded)
             }
 
             fn get_size(&self) -> usize {
                 Self::CAPACITY + (self.get_dynamic_size() as usize)
+            }
+
+            // Returns the raw wire bytes of the whole packet, as captured
+            // when it was parsed via `from()` (or last produced by
+            // `encode()`). `.clone()` on `Bytes` is a refcount bump, not a
+            // memcpy -- the returned handle shares the same backing
+            // allocation as `self.self_bytes`.
+            fn get_self(&self) -> Bytes {
+                self.self_bytes.clone()
             }
 
             #dynamic_functions
@@ -452,6 +480,16 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// off `buf` via `Buf::get_*`/`copy_to_slice`, and the dynamic
             /// payload (if any) is split off with zero-copy `split_to`.
             pub fn from(buf: &mut Bytes) -> io::Result<Self> {
+                // Snapshot the whole packet before anything is consumed.
+                // `buf` is documented (see above) to contain exactly this
+                // packet's bytes, so this is the packet's full wire
+                // representation. `Bytes::clone()` copies only the
+                // (ptr, len, cursor) header and bumps a refcount -- it does
+                // NOT copy the underlying byte data, and its cursor is
+                // independent of `buf`'s, so it's unaffected by the
+                // `advance`/`get_*`/`split_to` calls that follow.
+                let self_bytes: Bytes = buf.clone();
+
                 buf.advance(1); // skip the packet-id byte
 
                 #(#field_readers)*
@@ -461,6 +499,7 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Ok(Self {
                     #(#field_names),*
                     #dynamic_buffer_field_init
+                    #self_bytes_field_init
                 })
             }
 
@@ -471,16 +510,21 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             /// `awaitable` starts at 0 (neither client- nor
             /// server-awaitable) and can only be set afterward via
             /// `set_awaitable_client()` / `set_awaitable_server()`.
+            /// `self_bytes` starts empty here -- there's no wire
+            /// representation yet for a freshly-constructed packet -- and
+            /// is filled in the first time `encode()` runs.
             pub fn new(#(#ctor_params),*) -> Self {
                 #dynamic_size_from_payload
                 let nonce: u64 = 0;
                 let awaitable: u8 = 0;
+                let self_bytes: Bytes = Bytes::new();
 
                 #dynamic_buffer_new_init
 
                 Self {
                     #(#field_names),*
                     #dynamic_buffer_field_init
+                    #self_bytes_field_init
                 }
             }
 

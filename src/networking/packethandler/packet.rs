@@ -52,6 +52,8 @@ pub trait Packet: Send + Sync {
 
     fn set_nonce(&mut self, nonce: u64);
 
+    fn get_self(&self) -> Bytes;
+
     fn get_dynamic_size(&self) -> u64;
 }
 

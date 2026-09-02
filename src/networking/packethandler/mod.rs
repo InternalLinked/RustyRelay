@@ -7,6 +7,7 @@ use crate::networking::client::tcp::{TCPClientCore, TCPClientHandle};
 use crate::networking::packethandler::packet::DynamicPacket;
 use crate::networking::packethandler::packets::ack::Ack;
 use crate::networking::packethandler::packets::error_packet::RelayError;
+use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
 use crate::networking::packethandler::packets::lobby::create::{LobbyCreate, LobbyCreateSuccess};
 use crate::networking::packethandler::packets::lobby::join::{LobbyJoin, LobbyJoinSuccess};
 use crate::networking::packethandler::packets::lobby::kick::{LobbyClientKick, LobbyKick};
@@ -145,7 +146,8 @@ register_packets!(
     LobbyLeave,
     LobbyLeaveSuccess,
     LobbyKick,
-    LobbyClientKick
+    LobbyClientKick,
+    LobbyBroadcast
 );
 
 

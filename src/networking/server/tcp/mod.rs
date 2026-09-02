@@ -21,7 +21,7 @@ impl TCPServerCore {
         server_runtime().spawn(async move {
 
             let listener = TcpListener::bind(address).await.unwrap();
-            let mut core = TCPServerCore { listener, lobby_manager: LobbyManagerHandle::new(32, 255, 2), next_id: 0 };
+            let mut core = TCPServerCore { listener, lobby_manager: LobbyManagerHandle::new(96, 255, 2), next_id: 0 };
             core.listen().await.unwrap();
 
 

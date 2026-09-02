@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use bytes::Bytes;
 use slab::Slab;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -85,7 +86,7 @@ impl<H: StreamHandle> Lobby<H> {
     /// # TODO
     ///
     /// Placeholder — actual sending mechanics not yet implemented.
-    pub fn broadcast(&mut self, packet: AnyPacket) {
+    pub fn broadcast(&mut self, packet: Bytes) {
         for (_seat_id, _client) in self.clients.iter_mut() {
             // TODO: actually send `packet` to `_client`
         }
@@ -96,8 +97,8 @@ impl<H: StreamHandle> Lobby<H> {
     /// # TODO
     ///
     /// Placeholder — actual sending mechanics not yet implemented.
-    pub fn send_host(&mut self, packet: AnyPacket) {
-        // TODO: actually send `packet` to `self.host`
+    pub async fn send_host(&mut self, packet: Bytes) {
+        self.host.send_raw(packet).await;
     }
 
     /// Attempts to add `client` to this lobby's client slab, returning its assigned
@@ -206,7 +207,7 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// lobby doesn't exist.
     SendHost {
         lobby_id: usize,
-        packet: AnyPacket,
+        packet: Bytes,
         reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Close (remove) the lobby identified by `lobby_id`, on behalf of `requester_id`.
@@ -267,7 +268,7 @@ impl<H: StreamHandle> LobbyManager<H> {
     /// Intended to be spawned as its own task; see [`LobbyManagerHandle::new`].
     pub async fn run(mut self) {
         while let Some(instruction) = self.receiver.recv().await {
-            self.handle_instruction(instruction);
+            self.handle_instruction(instruction).await;
         }
     }
 
@@ -276,7 +277,7 @@ impl<H: StreamHandle> LobbyManager<H> {
     ///
     /// Reply-send failures (i.e. the caller dropped its `oneshot::Receiver`) are
     /// silently ignored, since there's no one left to observe the outcome.
-    fn handle_instruction(&mut self, instruction: LobbyInstruction<H>) {
+    async fn handle_instruction(&mut self, instruction: LobbyInstruction<H>) {
         match instruction {
             LobbyInstruction::Create { host, reply } => {
                 if self.lobbies.len() >= self.max_lobbies {
@@ -320,7 +321,7 @@ impl<H: StreamHandle> LobbyManager<H> {
             } => {
                 let result = match self.lobbies.get_mut(lobby_id) {
                     Some(lobby) => {
-                        lobby.broadcast(packet);
+                        //lobby.broadcast(packet);
                         Ok(())
                     }
                     None => Err(SendableError::LobbyNotFound),
@@ -335,7 +336,7 @@ impl<H: StreamHandle> LobbyManager<H> {
             } => {
                 let result = match self.lobbies.get_mut(lobby_id) {
                     Some(lobby) => {
-                        lobby.send_host(packet);
+                        lobby.send_host(packet).await;
                         Ok(())
                     }
                     None => Err(SendableError::LobbyNotFound),
@@ -597,7 +598,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn send_host(&self, lobby_id: usize, packet: AnyPacket) -> Result<(), SendableError> {
+    pub async fn send_host(&self, lobby_id: usize, packet: Bytes) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender

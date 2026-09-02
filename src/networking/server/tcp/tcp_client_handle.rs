@@ -29,20 +29,26 @@ impl TCPClientInstanceHandle {
 
     /* Is used when a client gets kicked */
     pub async fn reset_lobby_state(&mut self) {
-        self.sender.send(ClientContextInstruction::ResetLobbyState).await;    
+        let _ = self.sender.send(ClientContextInstruction::ResetLobbyState).await;    
     }
 
 }
 
 impl StreamHandle for TCPClientInstanceHandle {
 
-    async fn send(&mut self, anypacket: AnyPacket) {
+    async fn send(&self, anypacket: AnyPacket) {
         if self.sender.send(ClientContextInstruction::Packet {anypacket}).await.is_err() {
             todo!("Handle closed client");
         }
     }
 
-    async fn send_awaitable(&mut self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
+    async fn send_raw(&self, packet: Bytes) {
+        if self.sender.send(ClientContextInstruction::RawPacket { raw_packet: packet }).await.is_err() {
+            todo!("Handle closed client");
+        }
+    }
+
+    async fn send_awaitable(&self, anypacket: AnyPacket) -> io::Result<AnyPacket> {
         let (sender, r) = oneshot::channel::<AnyPacket>();
 
 
@@ -52,7 +58,7 @@ impl StreamHandle for TCPClientInstanceHandle {
         r.await.map_err(|e: oneshot::error::RecvError| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    async fn close(&mut self) {
+    async fn close(&self) {
         if self.sender.send(ClientContextInstruction::Close).await.is_err() {
             todo!("Handle closed server");
         }
@@ -68,6 +74,7 @@ pub struct TCPClientInstanceCore {
 
     client_handle: TCPClientInstanceHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>,
+    pub write_buffer: BytesMut,
     pub counter: usize,
     pub lobby_state: LobbyState
 
@@ -76,7 +83,7 @@ pub struct TCPClientInstanceCore {
 impl TCPClientInstanceCore {
     pub fn new(client_handle: TCPClientInstanceHandle) -> Self {
 
-        Self {client_handle, awaitable_cache: Slab::new(), lobby_state: LobbyState::Alone, counter: 0}
+        Self {client_handle, awaitable_cache: Slab::new(), lobby_state: LobbyState::Alone, counter: 0, write_buffer: BytesMut::with_capacity(MAX_TCP_LENGTH)}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientInstanceHandle {
@@ -132,7 +139,6 @@ impl TCPClientContext {
     pub async fn run(&mut self, client_handle: TCPClientInstanceHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
-        let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut core = TCPClientInstanceCore::new(client_handle);
 
@@ -167,33 +173,46 @@ impl TCPClientContext {
                     match instruction {
                         ClientContextInstruction::Packet {mut anypacket} => {
                             
-                            let encoded = anypacket.encode(&mut write_buffer).unwrap();
+                            let encoded = anypacket.encode(&mut core.write_buffer).unwrap();
                             //write_buffer.resize(MAX_TCP_LENGTH, 0);
-                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut write_buffer) else {
+                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut core.write_buffer) else {
                                 println!("[Client] Encryption error.");
                                 break;
                             };
 
-                            let Ok(()) = write_half.write_frame(&mut write_buffer.split_to(len).freeze()).await else {
+                            let Ok(()) = write_half.write_frame(&mut core.write_buffer.split_to(len).freeze()).await else {
                                 println!("[Client] Write error");
                                 break;
                             };
                             
 
                         },
+
+                        ClientContextInstruction::RawPacket {raw_packet} => {
+
+                            let Ok(len) = encryption_handler.encrypt(&raw_packet, &mut core.write_buffer) else {
+                                println!("[Client] Encryption error.");
+                                break;
+                            };
+
+                            let Ok(()) = write_half.write_frame(&mut core.write_buffer.split_to(len)).await else {
+                                println!("[Client] Write error");
+                                break;
+                            };
+                        }, 
                         
 
                         ClientContextInstruction::Awaitable {mut anypacket, sender} => {
                             let key = core.awaitable_cache.insert(sender);
 
-                            let encoded = anypacket.encode_awaitable_client(&mut write_buffer, key as u64).unwrap();
+                            let encoded = anypacket.encode_awaitable_client(&mut core.write_buffer, key as u64).unwrap();
                             //write_buffer.resize(MAX_TCP_LENGTH, 0);
-                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut write_buffer) else {
+                            let Ok(len) = encryption_handler.encrypt(&encoded, &mut core.write_buffer) else {
                                 println!("[Client] Encryption error.");
                                 break;
                             };
 
-                            let Ok(()) = write_half.write_frame(&mut write_buffer.split_to(len).freeze()).await else {
+                            let Ok(()) = write_half.write_frame(&mut core.write_buffer.split_to(len).freeze()).await else {
                                 println!("[Client] Write error");
                                 break;
                             };

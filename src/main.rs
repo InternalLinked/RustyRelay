@@ -29,6 +29,8 @@ fn main() {
     let mut client2 = RelayClient::connect("127.0.0.1:25565").unwrap();
 
     println!("Connected");
+    thread::sleep(Duration::from_secs(1));
+
 
     let code = host.create_lobby().unwrap();
     println!("Hosting on code: {code}");
@@ -36,12 +38,14 @@ fn main() {
     client1.join_lobby(code.clone()).unwrap();
     client2.join_lobby(code.clone()).unwrap();
 
-    client2.leave_lobby().unwrap();
+    for x in 0..10 {
+        let msg = Bytes::copy_from_slice(b"data");
 
-    host.close_client();
+        thread::sleep(Duration::from_secs(1));
 
-    client1.leave_lobby().unwrap();
-
+        client1.broadcast_lobby(msg.clone()).unwrap();
+        client2.broadcast_lobby(msg).unwrap();
+    }
 
 
     println!("Done");

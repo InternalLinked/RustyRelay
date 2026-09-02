@@ -44,6 +44,7 @@ impl LobbyLeave {
             LobbyState::Host { lobby_id, code } => {
                 todo!("Handle leave call by host")
             }
+            
         }
 
         ServerCallback::Pass

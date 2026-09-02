@@ -6,7 +6,7 @@ use std::io::{self};
 
 #[packet_macro::packet(11, true, true, false, 128, 64, 30)]
 pub struct LobbyBroadcast {
-
+    author: u64
 }
 
 impl LobbyBroadcast {
@@ -21,7 +21,18 @@ impl LobbyBroadcast {
                     client_core.get_client_handle().send(AnyPacket::RelayErrorPacket(error)).await;
                 }
             },
-            LobbyState::Client { lobby_id, seat_id: _ } => {
+            LobbyState::Client { lobby_id, seat_id } => {
+
+                /* Checking if the seat id of the instance matches with the id sent by the Client. If not the Client is probably 
+                trying to impersonate another client. If that is the case the connection gets killed */
+                if seat_id != self.read_author() as usize {
+
+                    /* The entire reson for doing this so "clunky" is, that we can just pass the recieved bytes to the host without copying or alloacting once */
+                    client_core.send_client_error(self, SendableError::NotAuthorized).await;
+
+                    return ServerCallback::Kill;
+                }
+
                 if let Err(e) = lobby_manager.send_host(lobby_id, self.get_self().clone()).await {
                     client_core.send_client_error(self, e).await;
                     return ServerCallback::Pass;
@@ -29,7 +40,9 @@ impl LobbyBroadcast {
 
             }
             LobbyState::Host { lobby_id, code: _ } => {
+            
                 if let Err(e) = lobby_manager.broadcast(lobby_id, self.get_self().clone()).await {
+
                     client_core.send_client_error(self, e).await;
                 }
             }
@@ -43,7 +56,16 @@ impl LobbyBroadcast {
 
         let s = str::from_utf8(self.get_dynamic()).unwrap();
 
-        println!("self {}", s);
+        match client_core.lobby_state {
+            LobbyState::Client { lobby_id, seat_id } => {
+                println!("Got from host: {s}");
+            },
+            LobbyState::Host { lobby_id, code } => {
+                println!("Got from client {s} with seat id: {}", self.read_author());
+            },
+            _ => ()
+
+        }
 
         ClientCallback::Pass
     }

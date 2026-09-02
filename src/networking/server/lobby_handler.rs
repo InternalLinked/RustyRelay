@@ -119,6 +119,7 @@ impl<H: StreamHandle> Lobby<H> {
     /// Removes and returns the client occupying `slot`, if any client is currently
     /// occupying it.
     pub fn remove_client(&mut self, slot: usize) -> Option<H> {
+        println!("Removing client");
         if self.clients.contains(slot) {
             Some(self.clients.remove(slot))
         } else {
@@ -133,6 +134,7 @@ impl<H: StreamHandle> Lobby<H> {
 
     pub async fn kick_all_clients(&mut self) {
         //Just allocating here as this enpoint is not often getting called compared to other endpoints
+        println!("Kicking all clients");
         let mut buffer = BytesMut::with_capacity(24);
 
         let mut packet = LobbyClientKick::new();
@@ -141,6 +143,7 @@ impl<H: StreamHandle> Lobby<H> {
         let enc = packet.encode(&mut buffer).unwrap();
 
         for (_seat_id, client) in self.clients.iter_mut() {
+            println!("Kicking {_seat_id}");
             client.send_raw(enc.clone()).await;
         }
     }
@@ -389,6 +392,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 requester_id,
                 reply,
             } => {
+                println!("Closing lobby");
                 let result = self.close_lobby(lobby_id, requester_id).await;
                 let _ = reply.send(result);
             }

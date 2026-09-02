@@ -30,6 +30,7 @@ impl LobbyJoin {
                 }
 
                 client_core.get_client_handle().send(LobbyJoinSuccessPacket(packet)).await;
+                
 
             },
             Err(e) => {

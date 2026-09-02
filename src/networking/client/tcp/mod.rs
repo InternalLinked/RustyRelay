@@ -121,7 +121,7 @@ impl TCPClientHandle {
         r.blocking_recv().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    pub fn close(&mut self) -> io::Result<()>{
+    pub fn blocking_close(&mut self) -> io::Result<()>{
         self.sender.blocking_send(ClientContextInstruction::Close).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 

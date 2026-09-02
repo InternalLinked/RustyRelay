@@ -9,13 +9,15 @@
 
 use std::collections::HashMap;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use slab::Slab;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use crate::networking::packethandler::AnyPacket;
+use crate::networking::packethandler::packet::Packet;
 use crate::networking::packethandler::packets::error_packet::SendableError;
+use crate::networking::packethandler::packets::lobby::kick::{LobbyClientKick, LobbyKick};
 use crate::networking::server::StreamHandle;
 use crate::util::random_code;
 
@@ -129,14 +131,18 @@ impl<H: StreamHandle> Lobby<H> {
         self.clients.contains(slot)
     }
 
-    /// Removes and returns every client currently in the lobby, e.g. so the caller
-    /// can notify/disconnect them when the lobby is closed.
-    ///
-    /// # TODO
-    ///
-    /// Not yet implemented.
-    pub fn drain_clients(&mut self) -> Vec<H> {
-        todo!("TODO: Close lobby");
+    pub async fn kick_all_clients(&mut self) {
+        //Just allocating here as this enpoint is not often getting called compared to other endpoints
+        let mut buffer = BytesMut::with_capacity(24);
+
+        let mut packet = LobbyClientKick::new();
+
+        //if this crashes something absolutely went wrong (should not happen);
+        let enc = packet.encode(&mut buffer).unwrap();
+
+        for (_seat_id, client) in self.clients.iter_mut() {
+            client.send_raw(enc.clone()).await;
+        }
     }
 }
 
@@ -383,7 +389,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 requester_id,
                 reply,
             } => {
-                let result = self.close_lobby(lobby_id, requester_id);
+                let result = self.close_lobby(lobby_id, requester_id).await;
                 let _ = reply.send(result);
             }
         }
@@ -399,7 +405,7 @@ impl<H: StreamHandle> LobbyManager<H> {
     ///
     /// Returns [`SendableError::LobbyNotFound`] if no such lobby exists, or
     /// [`SendableError::NotAuthorized`] if `requester_id` isn't the lobby's host.
-    fn close_lobby(&mut self, lobby_id: usize, requester_id: usize) -> Result<(), SendableError> {
+    async fn close_lobby(&mut self, lobby_id: usize, requester_id: usize) -> Result<(), SendableError> {
         let Some(lobby) = self.lobbies.get_mut(lobby_id) else {
             return Err(SendableError::LobbyNotFound);
         };
@@ -408,7 +414,7 @@ impl<H: StreamHandle> LobbyManager<H> {
             return Err(SendableError::NotAuthorized);
         }
 
-        lobby.drain_clients();
+        lobby.kick_all_clients().await;
         self.code_map.remove(&lobby.code);
         self.lobbies.remove(lobby_id);
         Ok(())

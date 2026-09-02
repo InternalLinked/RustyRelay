@@ -243,8 +243,8 @@ impl TCPClientContext {
         match core.lobby_state {
             
             LobbyState::Alone => (),
-            LobbyState::Host { lobby_id, code } => {
-                todo!("Closing lobby");
+            LobbyState::Host { lobby_id, code: _ } => {
+                let _ = self.lobby_manager.close(lobby_id, core.get_client_handle().get_id()).await;
             },
             LobbyState::Client { lobby_id, seat_id } => {
                 let _ = self.lobby_manager.leave(lobby_id, seat_id).await;

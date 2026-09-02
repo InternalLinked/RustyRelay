@@ -1,35 +1,76 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::AckPacket, packet::Packet}, server::{StreamHandle, lobby_handler::LobbyManagerHandle, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{AckPacket, LobbyCloseSuccessPacket, LobbyCreateSuccessPacket}, packet::Packet, packets::error_packet::SendableError}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-#[packet_macro::packet(1, true, false, false, 128, 64, 30)]
-pub struct Ack {
-    request: u8,
+#[packet_macro::packet(12, true, false, false, 128, 64, 30)]
+pub struct LobbyClose {
+    
 }
 
-impl Ack {
+impl LobbyClose {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
-        client_core.counter += 1;
+        
+        match client_core.lobby_state {
 
-        if client_core.counter % 10000 == 0 {
-            println!("Worked! {}", client_core.counter);
+            LobbyState::Host { lobby_id, code: _ } => {
+                if let Err(e) = lobby_manager.close(lobby_id, client_core.get_client_handle().get_id()).await {
+                    client_core.send_client_error(self, e).await;
+                    return ServerCallback::Pass;
+                };
+
+                
+                client_core.lobby_state = LobbyState::Alone;
+                
+                let mut packet = LobbyCloseSuccess::new();
+                if self.is_awaitable_client() {
+                    packet.set_awaitable_client();
+                    packet.set_nonce(self.get_nonce());
+                }
+
+
+                client_core.get_client_handle().send(LobbyCloseSuccessPacket(packet)).await;
+            }
+
+            _ => {
+
+                client_core.send_client_error(self, SendableError::AlreadyHostOrMember).await;
+            },
+
+
         }
-
-        let client_handle = client_core.get_client_handle();
-
-        /*let mut packet = Ack::new(1);
-        packet.set_nonce(self.get_nonce());
-        packet.set_awaitable_client();
-
-        client_handle.send(crate::networking::packethandler::AnyPacket::AckPacket(packet)).await;*/
 
         ServerCallback::Pass
     }
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
+
+
+        ClientCallback::Pass
+    }
+}
+
+
+
+#[packet_macro::packet(13, true, false, false, 128, 64, 30)]
+pub struct LobbyCloseSuccess {
+    
+}
+
+impl LobbyCloseSuccess {
+    pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+        
+
+        ServerCallback::Pass
+    }
+
+    pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
+        
+        println!("Lobby closed");
+        client_core.lobby_state = LobbyState::Alone;
+
         ClientCallback::Pass
     }
 }

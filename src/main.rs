@@ -47,6 +47,10 @@ fn main() {
         client2.broadcast_lobby(msg).unwrap();
     }
 
+    while let Some(p) = host.poll_packet() {
+        println!("Packet {:?}", p);
+    }
+
 
     println!("Done");
 

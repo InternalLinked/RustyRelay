@@ -59,9 +59,11 @@ impl LobbyBroadcast {
         match client_core.lobby_state {
             LobbyState::Client { lobby_id, seat_id } => {
                 println!("Got from host: {s}");
+                let _ = client_core.broadcast_writer.send(self.get_dynamic().clone()).await;
             },
             LobbyState::Host { lobby_id, code } => {
                 println!("Got from client {s} with seat id: {}", self.read_author());
+                let _ = client_core.broadcast_writer.send(self.get_self().clone()).await;
             },
             _ => ()
 

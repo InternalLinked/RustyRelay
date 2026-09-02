@@ -1,6 +1,7 @@
 use std::{error::Error, fmt, net::SocketAddr};
 
 use bytes::Bytes;
+use tokio::sync::mpsc::{self, Receiver};
 
 use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket::{self, LobbyBroadcastPacket, LobbyClosePacket, LobbyCreatePacket}, packets::{error_packet::SendableError, lobby::{broadcast::LobbyBroadcast, close::LobbyClose, create::LobbyCreate, join::LobbyJoin, leave::LobbyLeave}}}, server::{StreamHandle, lobby_handler::LobbyState}};
 
@@ -41,22 +42,27 @@ impl fmt::Display for RelayHandleError {
 impl Error for RelayHandleError {}
 
 
+
+
+
 pub struct RelayClient {
 
     tcp_client: TCPClientHandle,
     lobby_state: LobbyState,
-
+    broadcast_reader: Receiver<Bytes>
 }
 
 impl RelayClient {
 
     pub fn connect(address: &str) -> Result<Self, RelayHandleError> {
 
-        let address: SocketAddr = "127.0.0.1:25565".parse().map_err(|_| RelayHandleError::InvalidAddress)?;
+        let address: SocketAddr = address.parse().map_err(|_| RelayHandleError::InvalidAddress)?;
 
-        let tcp_client = TCPClientHandle::new(address)?;
+        let (sender, broadcast_reader) = mpsc::channel::<Bytes>(96);
 
-        Ok(Self {tcp_client, lobby_state: LobbyState::Alone})
+        let tcp_client = TCPClientHandle::new(address, sender)?;
+
+        Ok(Self {tcp_client, lobby_state: LobbyState::Alone, broadcast_reader})
         
     }
 
@@ -187,6 +193,10 @@ impl RelayClient {
             _ => panic!("Unexpected packet"),
         } 
 
+    }
+
+    pub fn poll_packet(&mut self) -> Option<Bytes> {
+        self.broadcast_reader.blocking_recv()
     }
 
     pub fn close_client(&mut self) {

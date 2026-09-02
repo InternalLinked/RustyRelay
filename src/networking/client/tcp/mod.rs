@@ -18,14 +18,15 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 pub struct TCPClientCore {
 
     client_handle: TCPClientHandle,
+    pub broadcast_writer: Sender<Bytes>,
     pub lobby_state: LobbyState
 
 }
 
 impl TCPClientCore {
-    pub fn new(client_handle: TCPClientHandle) -> Self {
+    pub fn new(client_handle: TCPClientHandle, broadcast_writer: Sender<Bytes>) -> Self {
 
-        Self {client_handle, lobby_state: LobbyState::Alone}
+        Self {client_handle, lobby_state: LobbyState::Alone, broadcast_writer}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientHandle {
@@ -78,7 +79,7 @@ impl StreamHandle for TCPClientHandle {
 
 
 impl TCPClientHandle {
-    pub fn new(address: SocketAddr) -> Result<TCPClientHandle, RelayHandleError> {
+    pub fn new(address: SocketAddr, broadcast_writer: Sender<Bytes>) -> Result<TCPClientHandle, RelayHandleError> {
         let (sender, receiver) = oneshot::channel::<Result<TCPClientHandle, RelayHandleError>>();
 
         client_runtime().spawn(async move {
@@ -87,7 +88,7 @@ impl TCPClientHandle {
             match TcpStream::connect(address).await {
 
                 Ok(stream) => {
-                    let handle = TCPClientContext::instantiate(stream).await;
+                    let handle = TCPClientContext::instantiate(stream, broadcast_writer).await;
                     let _ = sender.send(handle);
                 },
                 Err(_) => {
@@ -130,38 +131,37 @@ impl TCPClientHandle {
 
 struct TCPClientContext {
     receiver: Receiver<ClientContextInstruction>,
-    awaitable_cache: Slab<oneshot::Sender<AnyPacket>>
+    awaitable_cache: Slab<oneshot::Sender<AnyPacket>>,
 }
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream) -> Result<TCPClientHandle, RelayHandleError>{
+    pub async fn instantiate(stream: TcpStream, broadcast_writer: Sender<Bytes>) -> Result<TCPClientHandle, RelayHandleError>{
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(96);
         let client_handle = TCPClientHandle { sender };
-
-        
 
         let (read_half, write_half, encryption_handler) = ClientEncryptionLayer::new(stream).await.map_err(|_| RelayHandleError::HandshakeFailure)?;
 
         let mut context = TCPClientContext {
             receiver,
             awaitable_cache: Slab::new(),
+            
         };
 
         let client_handle_clone = client_handle.clone();
 
         tokio::spawn(async move {
-            context.run(client_handle_clone, read_half, write_half, encryption_handler).await;
+            context.run(client_handle_clone, read_half, write_half, encryption_handler, broadcast_writer).await;
         });
 
         Ok(client_handle)
     }
 
-    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler) {
+    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler, broadcast_writer: Sender<Bytes>) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut core = TCPClientCore::new(client_handle);
+        let mut core = TCPClientCore::new(client_handle, broadcast_writer);
 
         loop {
              tokio::select! {

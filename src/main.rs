@@ -85,15 +85,13 @@ fn main() {
 
     let dynamic = Bytes::copy_from_slice(b"test");
 
-    let packet = LobbyBroadcast::new(dynamic.clone());
 
-    handle.blocking_send(LobbyBroadcastPacket(packet));
+    for x in 0..10000{
+        let packet = LobbyBroadcast::new(dynamic.clone());
 
-    let packet = LobbyBroadcast::new(dynamic.clone());
-    handle.blocking_send(LobbyBroadcastPacket(packet));
+        host.blocking_send(LobbyBroadcastPacket(packet));
+    }
 
-    let packet = LobbyBroadcast::new(dynamic.clone());
-    handle.blocking_send(LobbyBroadcastPacket(packet));
 
     println!("Done");
 

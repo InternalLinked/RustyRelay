@@ -28,8 +28,10 @@ impl LobbyBroadcast {
                 }
 
             }
-            LobbyState::Host { lobby_id, code } => {
-
+            LobbyState::Host { lobby_id, code: _ } => {
+                if let Err(e) = lobby_manager.broadcast(lobby_id, self.get_self().clone()).await {
+                    client_core.send_client_error(self, e).await;
+                }
             }
         }
 

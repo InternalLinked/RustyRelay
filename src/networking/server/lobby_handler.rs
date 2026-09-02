@@ -86,9 +86,9 @@ impl<H: StreamHandle> Lobby<H> {
     /// # TODO
     ///
     /// Placeholder — actual sending mechanics not yet implemented.
-    pub fn broadcast(&mut self, packet: Bytes) {
-        for (_seat_id, _client) in self.clients.iter_mut() {
-            // TODO: actually send `packet` to `_client`
+    pub async fn broadcast(&mut self, packet: Bytes) {
+        for (_seat_id, client) in self.clients.iter_mut() {
+            client.send_raw(packet.clone()).await;
         }
     }
 
@@ -198,7 +198,7 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// lobby doesn't exist.
     Broadcast {
         lobby_id: usize,
-        packet: AnyPacket,
+        packet: Bytes,
         reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Send `packet` to only the host of the lobby identified by `lobby_id`.
@@ -321,7 +321,7 @@ impl<H: StreamHandle> LobbyManager<H> {
             } => {
                 let result = match self.lobbies.get_mut(lobby_id) {
                     Some(lobby) => {
-                        //lobby.broadcast(packet);
+                        lobby.broadcast(packet).await;
                         Ok(())
                     }
                     None => Err(SendableError::LobbyNotFound),
@@ -573,7 +573,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn broadcast(&self, lobby_id: usize, packet: AnyPacket) -> Result<(), SendableError> {
+    pub async fn broadcast(&self, lobby_id: usize, packet: Bytes) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender

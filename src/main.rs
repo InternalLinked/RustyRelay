@@ -25,32 +25,9 @@ fn main() {
     
 
     let mut host = RelayClient::connect("127.0.0.1:25565").unwrap();
-    let mut client1 = RelayClient::connect("127.0.0.1:25565").unwrap();
-    let mut client2 = RelayClient::connect("127.0.0.1:25565").unwrap();
+    let code  = host.create_lobby().unwrap();
 
-    println!("Connected");
-    thread::sleep(Duration::from_secs(1));
-
-
-    let code = host.create_lobby().unwrap();
-    println!("Hosting on code: {code}");
-
-    client1.join_lobby(code.clone()).unwrap();
-    client2.join_lobby(code.clone()).unwrap();
-
-    for x in 0..10 {
-        let msg = Bytes::copy_from_slice(b"data");
-
-        thread::sleep(Duration::from_secs(1));
-
-        client1.broadcast_lobby(msg.clone()).unwrap();
-        client2.broadcast_lobby(msg).unwrap();
-    }
-
-    while let Some(p) = host.poll_packet() {
-        println!("Packet {:?}", p);
-    }
-
+    println!("Lobby code: {code}");
 
     println!("Done");
 

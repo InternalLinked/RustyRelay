@@ -26,28 +26,30 @@ impl RelayError {
 ///
 /// These are returned inside the `Result` layer of each [`LobbyManagerHandle`] method's
 /// response (see those methods for how this combines with the outer `Option`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum SendableError {
+    ConnectionClose = 0,
     /// Reserved for signaling a kick-related failure or notification. Not currently
     /// produced by [`LobbyManager`] itself — see [`NotAuthorized`](SendableError::NotAuthorized)
     /// for the "requester isn't the host" case.
-    Kick,
-    AlreadyHostOrMember,
+    Kick = 1,
+    AlreadyHostOrMember = 2,
     /// The target lobby already has the maximum number of clients allowed
     /// (`max_clients_per_lobby`), so [`Lobby::add_client`] refused to add another one.
-    LobbyFull,
+    LobbyFull = 3,
     /// The [`LobbyManager`] already has the maximum number of lobbies allowed
     /// (`max_lobbies`), so no new lobby could be created.
-    MaxLobbiesExceded,
+    MaxLobbiesExceded = 4,
     /// The `lobby_id`/join code supplied does not correspond to any currently active
     /// lobby (either it never existed or has since been closed).
-    LobbyNotFound,
+    LobbyNotFound = 5,
     /// The requester attempted an action (e.g. kicking a client or closing a lobby)
     /// that only the lobby's host is permitted to perform.
-    NotAuthorized,
+    NotAuthorized = 6,
     /// The lobby was found, but the given seat was not occupied by any client.
-    SeatNotFound,
+    SeatNotFound = 7,
     /// If the client is not hosting or part of a lobby to perfom action
-    NoMember
+    NoMember = 8
 
 }

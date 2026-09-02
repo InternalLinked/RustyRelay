@@ -3,6 +3,7 @@ use std::{thread, time::{Duration, Instant}};
 use crate::networking::packethandler::{AnyPacket::LobbyBroadcastPacket, packets::lobby::leave::LobbyLeave};
 use crate::networking::packethandler::packets::lobby::kick::LobbyKick;
 use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
+use crate::networking::client::RelayClient;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
@@ -23,76 +24,25 @@ fn main() {
 
     
 
-    let mut host = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
+    let mut host = RelayClient::connect("127.0.0.1:25565").unwrap();
+    let mut client1 = RelayClient::connect("127.0.0.1:25565").unwrap();
+    let mut client2 = RelayClient::connect("127.0.0.1:25565").unwrap();
 
-    thread::sleep(Duration::from_millis(1000));
-    println!("Sending");
+    println!("Connected");
 
-    let packet = LobbyCreate::new();
+    let code = host.create_lobby().unwrap();
+    println!("Hosting on code: {code}");
 
-    let start = Instant::now();
-    let code: u64 = match host.blocking_send_awaitable(AnyPacket::LobbyCreatePacket(packet)).unwrap() {
-        AnyPacket::LobbyCreateSuccessPacket(success) => {
-            let bytes = success.read_lobby_code().to_le_bytes();
-            let code = str::from_utf8(&bytes).unwrap();
+    client1.join_lobby(code.clone()).unwrap();
+    client2.join_lobby(code.clone()).unwrap();
 
-            println!("Created Lobby successfull!\n LobbyID: {},\n Lobby_Code: {}", success.read_lobby_id(), code);
-            success.read_lobby_code() as u64
+    client2.leave_lobby().unwrap();
 
-        },
-        AnyPacket::RelayErrorPacket(code) => panic!("got error {}", code.read_code()),
-        _ => panic!("Unexpected packet"),
-    };
+    host.close_client();
 
-    let duration = start.elapsed();
-    println!("Time taken: {} ms", duration.as_millis());
-
-    let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
-
-    let packet = LobbyJoin::new(code);
+    client1.leave_lobby().unwrap();
 
 
-    match handle.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
-
-        AnyPacket::LobbyJoinSuccessPacket(packet) => {
-
-            println!("Joined lobby:\nLobby_Id: {}, Seat_Id: {}", packet.read_lobby_id(), packet.read_seat_id());
-
-
-
-        }
-        AnyPacket::RelayErrorPacket(code) => panic!("got error {}", code.read_code()),
-        _ => panic!("Unexpected packet"),
-    } 
-
-
-    let mut handle = TCPClientHandle::new("127.0.0.1:25565".parse().unwrap()).unwrap();
-
-    let packet = LobbyJoin::new(code);
-
-    match handle.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
-
-        AnyPacket::LobbyJoinSuccessPacket(packet) => {
-            println!("Joined lobby:\nLobby_Id: {}, Seat_Id: {}", packet.read_lobby_id(), packet.read_seat_id());
-
-
-
-        }
-        AnyPacket::RelayErrorPacket(code) => panic!("got error {}", code.read_code()),
-        _ => panic!("Unexpected packet"),
-    } 
-
-
-    let dynamic = Bytes::copy_from_slice(b"test");
-
-
-    /*for x in 0..10{
-        let packet = LobbyBroadcast::new(dynamic.clone());
-
-        host.blocking_send(LobbyBroadcastPacket(packet));
-    }*/
-    
-    host.blocking_close();
 
     println!("Done");
 

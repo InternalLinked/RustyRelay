@@ -11,6 +11,7 @@ use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandl
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::{RelayError, SendableError};
 use crate::networking::packethandler::packets::lobby::kick::LobbyClientKick;
+use crate::networking::packethandler::packets::lobby::leave::LobbyLeftEvent;
 use crate::networking::server::lobby_handler::LobbyState;
 use crate::util::{ClientContextInstruction};
 use crate::util::EncryptionState::{Handshake, Unsecure};
@@ -248,6 +249,12 @@ impl TCPClientContext {
             },
             LobbyState::Client { lobby_id, seat_id } => {
                 let _ = self.lobby_manager.leave(lobby_id, seat_id).await;
+                
+                /* Notify lobby that client left */
+                let mut left_event = LobbyLeftEvent::new(seat_id as u64);
+                let left_event = left_event.encode(&mut core.write_buffer).unwrap();
+                let _ = self.lobby_manager.send_host(lobby_id, left_event).await;
+
             },
         }
 

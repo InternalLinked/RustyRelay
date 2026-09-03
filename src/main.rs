@@ -29,6 +29,13 @@ fn main() {
 
     println!("Lobby code: {code}");
 
+    loop {
+        thread::sleep(Duration::from_millis(1000));
+
+        let packet = Bytes::copy_from_slice(b"heyy   test");
+        host.broadcast_lobby(packet).unwrap();
+    }
+
     println!("Done");
 
     loop {

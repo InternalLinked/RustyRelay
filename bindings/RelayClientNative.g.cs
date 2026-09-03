@@ -74,25 +74,29 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_broadcast(RelayClientHandle* handle, byte* data, System.UIntPtr data_len);
 
         /// <summary>
-        ///  Blocks until the next broadcast packet arrives, then hands ownership of a
-        ///  freshly Rust-allocated buffer back through `out_data`/`out_len`.
+        ///  Blocks until the next event (broadcast packet, lobby join, or lobby
+        ///  leave) arrives, and writes it into the caller-allocated `*out_event`.
         ///
-        ///  You MUST release this buffer with `relay_free_buffer` exactly once.
+        ///  If the written `kind == Broadcast` (0), `data_ptr`/`data_len` describe a
+        ///  Rust-allocated buffer you MUST release with `relay_free_buffer` exactly
+        ///  once. For `LobbyJoined`/`LobbyLeft` (1/2), no buffer is allocated —
+        ///  there's nothing to free.
         ///
         ///  Call this from a dedicated background thread on the C# side (there's no
         ///  `async`/`await` in .NET 3.5, and this call blocks indefinitely).
         ///
-        ///  Returns `FfiStatus::Ok` with data on success, or
-        ///  `FfiStatus::ConnectionClosedByPeer` with `*out_data = null` / `*out_len =
-        ///  0` if the internal channel has closed (e.g. after `relay_client_close`).
+        ///  Returns `FfiStatus::Ok` with `*out_event` populated on success, or
+        ///  `FfiStatus::ConnectionClosedByPeer` with `*out_event` zeroed if the
+        ///  internal channel has closed (e.g. after `relay_client_close`).
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "relay_client_poll_packet", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte relay_client_poll_packet(RelayClientHandle* handle, byte** out_data, System.UIntPtr* out_len);
+        [DllImport(__DllName, EntryPoint = "relay_client_poll_event", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte relay_client_poll_event(RelayClientHandle* handle, RelayEvent* out_event);
 
         /// <summary>
-        ///  Frees a buffer previously returned by `relay_client_poll_packet`.
-        ///  Safe to call with `data == null` (no-op). Do not call twice on the same
-        ///  pointer, and do not call on a buffer you allocated yourself.
+        ///  Frees a buffer previously returned by `relay_client_poll_event` (only
+        ///  when its `kind` was `Broadcast`). Safe to call with `data == null`
+        ///  (no-op). Do not call twice on the same pointer, and do not call on a
+        ///  buffer you allocated yourself.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "relay_free_buffer", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void relay_free_buffer(byte* data, System.UIntPtr len);
@@ -140,6 +144,31 @@ namespace RelayClient.Interop
     internal unsafe partial struct RelayClientHandle
     {
         public fixed byte _private[1];
+    }
+
+    /// <summary>
+    ///  C-ABI representation of `RelayClientCallback`.
+    ///
+    ///  C has no tagged unions with variant-specific fields the way Rust does,
+    ///  so this flattens all three variants into one fixed-layout struct: a
+    ///  discriminant byte (`kind`, see `RelayEventKind`) plus every field any
+    ///  variant might need. Fields that don't apply to the current `kind` are
+    ///  always zeroed/null rather than left uninitialized.
+    ///
+    ///  - `author_id` is populated for every variant.
+    ///  - `data_ptr`/`data_len` are ONLY meaningful when `kind == Broadcast`
+    ///    (0). When populated, the buffer is Rust-allocated and must be
+    ///    released via `relay_free_buffer` exactly once — same contract the old
+    ///    `poll_packet` had. For `LobbyJoined`/`LobbyLeft` they're always
+    ///    null/0 and there's nothing to free.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct RelayEvent
+    {
+        public byte kind;
+        public ulong author_id;
+        public byte* data_ptr;
+        public System.UIntPtr data_len;
     }
 
 

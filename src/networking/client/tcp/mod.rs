@@ -6,7 +6,7 @@ use bytes::{Buf, Bytes, BytesMut, buf};
 use slab::Slab;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
-use crate::networking::client::RelayHandleError;
+use crate::networking::client::{RelayClientCallback, RelayHandleError};
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::TCPClientPacketHandler;
@@ -18,15 +18,15 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 pub struct TCPClientCore {
 
     client_handle: TCPClientHandle,
-    pub broadcast_writer: Sender<Bytes>,
+    pub relay_callback_writer: Sender<RelayClientCallback>,
     pub lobby_state: LobbyState
 
 }
 
 impl TCPClientCore {
-    pub fn new(client_handle: TCPClientHandle, broadcast_writer: Sender<Bytes>) -> Self {
+    pub fn new(client_handle: TCPClientHandle, relay_callback_writer: Sender<RelayClientCallback>) -> Self {
 
-        Self {client_handle, lobby_state: LobbyState::Alone, broadcast_writer}
+        Self {client_handle, lobby_state: LobbyState::Alone, relay_callback_writer}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientHandle {
@@ -79,7 +79,7 @@ impl StreamHandle for TCPClientHandle {
 
 
 impl TCPClientHandle {
-    pub fn new(address: SocketAddr, broadcast_writer: Sender<Bytes>) -> Result<TCPClientHandle, RelayHandleError> {
+    pub fn new(address: SocketAddr, relay_callback_writer: Sender<RelayClientCallback>) -> Result<TCPClientHandle, RelayHandleError> {
         let (sender, receiver) = oneshot::channel::<Result<TCPClientHandle, RelayHandleError>>();
 
         client_runtime().spawn(async move {
@@ -88,7 +88,7 @@ impl TCPClientHandle {
             match TcpStream::connect(address).await {
 
                 Ok(stream) => {
-                    let handle = TCPClientContext::instantiate(stream, broadcast_writer).await;
+                    let handle = TCPClientContext::instantiate(stream, relay_callback_writer).await;
                     let _ = sender.send(handle);
                 },
                 Err(_) => {
@@ -135,7 +135,7 @@ struct TCPClientContext {
 }
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, broadcast_writer: Sender<Bytes>) -> Result<TCPClientHandle, RelayHandleError>{
+    pub async fn instantiate(stream: TcpStream, relay_callback_writer: Sender<RelayClientCallback>) -> Result<TCPClientHandle, RelayHandleError>{
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(96);
         let client_handle = TCPClientHandle { sender };
 
@@ -150,18 +150,18 @@ impl TCPClientContext {
         let client_handle_clone = client_handle.clone();
 
         tokio::spawn(async move {
-            context.run(client_handle_clone, read_half, write_half, encryption_handler, broadcast_writer).await;
+            context.run(client_handle_clone, read_half, write_half, encryption_handler, relay_callback_writer).await;
         });
 
         Ok(client_handle)
     }
 
-    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler, broadcast_writer: Sender<Bytes>) {
+    pub async fn run(&mut self, client_handle: TCPClientHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler, relay_callback_writer: Sender<RelayClientCallback>) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut core = TCPClientCore::new(client_handle, broadcast_writer);
+        let mut core = TCPClientCore::new(client_handle, relay_callback_writer);
 
         loop {
              tokio::select! {

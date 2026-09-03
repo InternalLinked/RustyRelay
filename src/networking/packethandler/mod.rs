@@ -10,9 +10,9 @@ use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
 use crate::networking::packethandler::packets::lobby::close::{LobbyClose, LobbyCloseSuccess};
 use crate::networking::packethandler::packets::lobby::create::{LobbyCreate, LobbyCreateSuccess};
-use crate::networking::packethandler::packets::lobby::join::{LobbyJoin, LobbyJoinSuccess};
+use crate::networking::packethandler::packets::lobby::join::{LobbyJoin, LobbyJoinSuccess, LobbyJoinedEvent};
 use crate::networking::packethandler::packets::lobby::kick::{LobbyClientKick, LobbyKick};
-use crate::networking::packethandler::packets::lobby::leave::{LobbyLeave, LobbyLeaveSuccess};
+use crate::networking::packethandler::packets::lobby::leave::{LobbyLeave, LobbyLeaveSuccess, LobbyLeftEvent};
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle};
 use crate::util::{ClientCallback, EncryptionState, ServerCallback};
@@ -151,6 +151,8 @@ register_packets!(
     LobbyBroadcast,
     LobbyClose,
     LobbyCloseSuccess,
+    LobbyLeftEvent,
+    LobbyJoinedEvent,
 );
 
 

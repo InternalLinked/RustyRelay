@@ -17,9 +17,12 @@
 //! ## Ownership convention
 //! - `relay_client_connect` hands you an opaque `*mut RelayClientHandle`. You
 //!   own it and must eventually call `relay_client_free`.
-//! - `relay_client_poll_packet` hands you a Rust-allocated buffer. You must
-//!   return it via `relay_free_buffer` exactly once — don't free it any other
-//!   way and don't use it after freeing.
+//! - `relay_client_poll_event` hands you a `RelayEvent` by value (you
+//!   allocate it, we just fill it in). If `kind == Broadcast`, its
+//!   `data_ptr`/`data_len` describe a Rust-allocated buffer you must return
+//!   via `relay_free_buffer` exactly once — don't free it any other way and
+//!   don't use it after freeing. For every other `kind`, no buffer exists
+//!   and there's nothing to free.
 //! - Every other buffer (lobby codes, join codes, broadcast payloads) is
 //!   caller-allocated: you own it before and after the call.
 //!
@@ -38,7 +41,7 @@ use std::slice;
 
 use bytes::Bytes;
 
-use crate::networking::client::{RelayClient, RelayHandleError};
+use crate::networking::client::{RelayClient, RelayClientCallback, RelayHandleError};
 use crate::networking::packethandler::packets::error_packet::SendableError;
 
 /// Opaque handle representing a connected `RelayClient`, as seen from the
@@ -113,6 +116,82 @@ fn map_relay_handle_error(err: RelayHandleError) -> u8 {
         RelayHandleError::HandshakeFailure => FfiStatus::HandshakeFailure as u8,
         RelayHandleError::ConnectionClosed => FfiStatus::ConnectionClosedByPeer as u8,
         RelayHandleError::PipeError => FfiStatus::PipeError as u8,
+    }
+}
+
+/// Discriminant values for `RelayEvent::kind`.
+///
+/// This exists purely for readable `match`ing on the Rust side — the value
+/// that actually crosses the FFI boundary is the plain `u8` field on
+/// `RelayEvent`, not this enum itself. csbindgen won't auto-generate a C#
+/// enum for it (it's never used directly in an extern "C" signature), so
+/// the C# side mirrors these values by hand. Keep the two in sync if this
+/// ever changes.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayEventKind {
+    Broadcast = 0,
+    LobbyJoined = 1,
+    LobbyLeft = 2,
+}
+
+/// C-ABI representation of `RelayClientCallback`.
+///
+/// C has no tagged unions with variant-specific fields the way Rust does,
+/// so this flattens all three variants into one fixed-layout struct: a
+/// discriminant byte (`kind`, see `RelayEventKind`) plus every field any
+/// variant might need. Fields that don't apply to the current `kind` are
+/// always zeroed/null rather than left uninitialized.
+///
+/// - `author_id` is populated for every variant.
+/// - `data_ptr`/`data_len` are ONLY meaningful when `kind == Broadcast`
+///   (0). When populated, the buffer is Rust-allocated and must be
+///   released via `relay_free_buffer` exactly once — same contract the old
+///   `poll_packet` had. For `LobbyJoined`/`LobbyLeft` they're always
+///   null/0 and there's nothing to free.
+#[repr(C)]
+pub struct RelayEvent {
+    pub kind: u8,
+    pub author_id: u64,
+    pub data_ptr: *mut u8,
+    pub data_len: usize,
+}
+
+impl RelayEvent {
+    fn broadcast(author_id: usize, data_ptr: *mut u8, data_len: usize) -> Self {
+        Self {
+            kind: RelayEventKind::Broadcast as u8,
+            author_id: author_id as u64,
+            data_ptr,
+            data_len,
+        }
+    }
+
+    fn lobby_joined(author_id: usize) -> Self {
+        Self {
+            kind: RelayEventKind::LobbyJoined as u8,
+            author_id: author_id as u64,
+            data_ptr: ptr::null_mut(),
+            data_len: 0,
+        }
+    }
+
+    fn lobby_left(author_id: usize) -> Self {
+        Self {
+            kind: RelayEventKind::LobbyLeft as u8,
+            author_id: author_id as u64,
+            data_ptr: ptr::null_mut(),
+            data_len: 0,
+        }
+    }
+
+    fn empty() -> Self {
+        Self {
+            kind: 0,
+            author_id: 0,
+            data_ptr: ptr::null_mut(),
+            data_len: 0,
+        }
     }
 }
 
@@ -308,60 +387,83 @@ pub extern "C" fn relay_client_broadcast(
     outcome.unwrap_or(FfiStatus::PanicCaught as u8)
 }
 
-/// Blocks until the next broadcast packet arrives, then hands ownership of a
-/// freshly Rust-allocated buffer back through `out_data`/`out_len`.
+/// Blocks until the next event (broadcast packet, lobby join, or lobby
+/// leave) arrives, and writes it into the caller-allocated `*out_event`.
 ///
-/// You MUST release this buffer with `relay_free_buffer` exactly once.
+/// If the written `kind == Broadcast` (0), `data_ptr`/`data_len` describe a
+/// Rust-allocated buffer you MUST release with `relay_free_buffer` exactly
+/// once. For `LobbyJoined`/`LobbyLeft` (1/2), no buffer is allocated —
+/// there's nothing to free.
 ///
 /// Call this from a dedicated background thread on the C# side (there's no
 /// `async`/`await` in .NET 3.5, and this call blocks indefinitely).
 ///
-/// Returns `FfiStatus::Ok` with data on success, or
-/// `FfiStatus::ConnectionClosedByPeer` with `*out_data = null` / `*out_len =
-/// 0` if the internal channel has closed (e.g. after `relay_client_close`).
+/// Returns `FfiStatus::Ok` with `*out_event` populated on success, or
+/// `FfiStatus::ConnectionClosedByPeer` with `*out_event` zeroed if the
+/// internal channel has closed (e.g. after `relay_client_close`).
 #[unsafe(no_mangle)]
-pub extern "C" fn relay_client_poll_packet(
+pub extern "C" fn relay_client_poll_event(
     handle: *mut RelayClientHandle,
-    out_data: *mut *mut u8,
-    out_len: *mut usize,
+    out_event: *mut RelayEvent,
 ) -> u8 {
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         let client = match unsafe { handle_to_client(handle) } {
             Some(c) => c,
             None => return FfiStatus::NullPointer as u8,
         };
-        if out_data.is_null() || out_len.is_null() {
+        if out_event.is_null() {
             return FfiStatus::NullPointer as u8;
         }
 
-        match client.poll_packet() {
-            Some(bytes) => {
-                let mut boxed_slice = bytes.to_vec().into_boxed_slice();
+        match client.poll_event() {
+            Some(RelayClientCallback::Broadcast { author_id, buffer }) => {
+                let mut boxed_slice = buffer.to_vec().into_boxed_slice();
                 let len = boxed_slice.len();
                 let data_ptr = boxed_slice.as_mut_ptr();
                 std::mem::forget(boxed_slice);
                 unsafe {
-                    *out_data = data_ptr;
-                    *out_len = len;
+                    *out_event = RelayEvent::broadcast(author_id, data_ptr, len);
+                }
+                FfiStatus::Ok as u8
+            }
+            Some(RelayClientCallback::LobbyJoined { author_id }) => {
+                unsafe {
+                    *out_event = RelayEvent::lobby_joined(author_id);
+                }
+                FfiStatus::Ok as u8
+            }
+            Some(RelayClientCallback::LobbyLeft { author_id }) => {
+                unsafe {
+                    *out_event = RelayEvent::lobby_left(author_id);
                 }
                 FfiStatus::Ok as u8
             }
             None => {
                 unsafe {
-                    *out_data = ptr::null_mut();
-                    *out_len = 0;
+                    *out_event = RelayEvent::empty();
                 }
                 FfiStatus::ConnectionClosedByPeer as u8
             }
         }
     }));
 
-    outcome.unwrap_or(FfiStatus::PanicCaught as u8)
+    match outcome {
+        Ok(status) => status,
+        Err(_) => {
+            if !out_event.is_null() {
+                unsafe {
+                    *out_event = RelayEvent::empty();
+                }
+            }
+            FfiStatus::PanicCaught as u8
+        }
+    }
 }
 
-/// Frees a buffer previously returned by `relay_client_poll_packet`.
-/// Safe to call with `data == null` (no-op). Do not call twice on the same
-/// pointer, and do not call on a buffer you allocated yourself.
+/// Frees a buffer previously returned by `relay_client_poll_event` (only
+/// when its `kind` was `Broadcast`). Safe to call with `data == null`
+/// (no-op). Do not call twice on the same pointer, and do not call on a
+/// buffer you allocated yourself.
 #[unsafe(no_mangle)]
 pub extern "C" fn relay_free_buffer(data: *mut u8, len: usize) {
     if data.is_null() {

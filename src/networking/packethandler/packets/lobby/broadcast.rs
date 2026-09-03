@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{self, AckPacket}, packet::Packet, packets::error_packet::{RelayError, SendableError}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::{RelayClientCallback, tcp::{TCPClientCore, TCPClientHandle}}, packethandler::{AnyPacket::{self, AckPacket}, packet::Packet, packets::error_packet::{RelayError, SendableError}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -58,12 +58,10 @@ impl LobbyBroadcast {
 
         match client_core.lobby_state {
             LobbyState::Client { lobby_id, seat_id } => {
-                println!("Got from host: {s}");
-                let _ = client_core.broadcast_writer.send(self.get_dynamic().clone()).await;
+                let _ = client_core.relay_callback_writer.send(RelayClientCallback::Broadcast { author_id: 0, buffer: self.get_dynamic().clone() }).await;
             },
             LobbyState::Host { lobby_id, code } => {
-                println!("Got from client {s} with seat id: {}", self.read_author());
-                let _ = client_core.broadcast_writer.send(self.get_self().clone()).await;
+                let _ = client_core.relay_callback_writer.send(RelayClientCallback::Broadcast { author_id: self.read_author() as usize, buffer: self.get_dynamic().clone() }).await;
             },
             _ => ()
 

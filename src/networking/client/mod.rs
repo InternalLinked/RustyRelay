@@ -43,13 +43,18 @@ impl Error for RelayHandleError {}
 
 
 
+pub enum RelayClientCallback {
+    Broadcast{author_id: usize, buffer: Bytes},
+    LobbyJoined{author_id: usize},
+    LobbyLeft{author_id: usize}
 
+}
 
 pub struct RelayClient {
 
     tcp_client: TCPClientHandle,
     lobby_state: LobbyState,
-    broadcast_reader: Receiver<Bytes>
+    broadcast_reader: Receiver<RelayClientCallback>
 }
 
 impl RelayClient {
@@ -58,7 +63,7 @@ impl RelayClient {
 
         let address: SocketAddr = address.parse().map_err(|_| RelayHandleError::InvalidAddress)?;
 
-        let (sender, broadcast_reader) = mpsc::channel::<Bytes>(96);
+        let (sender, broadcast_reader) = mpsc::channel::<RelayClientCallback>(96);
 
         let tcp_client = TCPClientHandle::new(address, sender)?;
 
@@ -195,7 +200,7 @@ impl RelayClient {
 
     }
 
-    pub fn poll_packet(&mut self) -> Option<Bytes> {
+    pub fn poll_event(&mut self) -> Option<RelayClientCallback> {
         self.broadcast_reader.blocking_recv()
     }
 

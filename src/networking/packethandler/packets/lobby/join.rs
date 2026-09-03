@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{AckPacket, LobbyJoinSuccessPacket, RelayErrorPacket}, packet::Packet, packets::error_packet::{RelayError, SendableError}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::{RelayClientCallback, tcp::{TCPClientCore, TCPClientHandle}}, packethandler::{AnyPacket::{AckPacket, LobbyJoinSuccessPacket, RelayErrorPacket}, packet::Packet, packets::error_packet::{RelayError, SendableError}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self};
@@ -22,6 +22,11 @@ impl LobbyJoin {
             Ok((lobby_id, seat_id)) => {
 
                 client_core.lobby_state = LobbyState::Client { lobby_id, seat_id };
+                
+                /* Notfiy the host that a client joined */
+                let mut joined_event = LobbyJoinedEvent::new(seat_id as u64);
+                let joined_event = joined_event.encode(&mut client_core.write_buffer).unwrap();
+                let _ = lobby_manager.send_host(lobby_id, joined_event).await;
 
                 let mut packet = LobbyJoinSuccess::new(lobby_id as u64, seat_id as u64);
                 if self.is_awaitable_client() {
@@ -64,6 +69,29 @@ impl LobbyJoinSuccess {
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
 
         client_core.lobby_state = LobbyState::Client { lobby_id: self.read_lobby_id() as usize, seat_id: self.read_seat_id() as usize };
+        
+        ClientCallback::Pass
+    }
+}
+
+#[packet_macro::packet(14, true, false, false, 128, 64, 30)]
+pub struct LobbyJoinedEvent {
+    seat_id: u64
+}
+
+impl LobbyJoinedEvent {
+    pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+
+        ServerCallback::Pass
+    }
+
+    pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
+
+        if let LobbyState::Host { lobby_id: _, code: _ } = client_core.lobby_state {
+
+            let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbyJoined { author_id: self.read_seat_id() as usize }).await;
+
+        }
         
         ClientCallback::Pass
     }

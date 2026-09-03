@@ -133,6 +133,7 @@ pub enum RelayEventKind {
     Broadcast = 0,
     LobbyJoined = 1,
     LobbyLeft = 2,
+    LobbyKicked = 3,
 }
 
 /// C-ABI representation of `RelayClientCallback`.
@@ -180,6 +181,19 @@ impl RelayEvent {
         Self {
             kind: RelayEventKind::LobbyLeft as u8,
             author_id: author_id as u64,
+            data_ptr: ptr::null_mut(),
+            data_len: 0,
+        }
+    }
+
+    /// `LobbyKicked` carries no fields on the Rust side (it's only ever
+    /// sent to the client that got kicked, so there's no third party to
+    /// identify) -- `author_id` is left at 0 and should be ignored by
+    /// callers for this `kind`.
+    fn lobby_kicked() -> Self {
+        Self {
+            kind: RelayEventKind::LobbyKicked as u8,
+            author_id: 0,
             data_ptr: ptr::null_mut(),
             data_len: 0,
         }
@@ -355,6 +369,28 @@ pub extern "C" fn relay_client_close_lobby(handle: *mut RelayClientHandle) -> u8
     outcome.unwrap_or(FfiStatus::PanicCaught as u8)
 }
 
+/// Kicks the client occupying `seat_id` from the current lobby. Host-only
+/// on the server side — if the caller isn't currently hosting, the
+/// underlying `kick_client` call itself returns `NotAuthorized` rather than
+/// this layer rejecting it, so that error still comes back as a normal
+/// `SendableError` code (6).
+#[unsafe(no_mangle)]
+pub extern "C" fn relay_client_kick_client(handle: *mut RelayClientHandle, seat_id: u64) -> u8 {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let client = match unsafe { handle_to_client(handle) } {
+            Some(c) => c,
+            None => return FfiStatus::NullPointer as u8,
+        };
+
+        match client.kick_client(seat_id as usize) {
+            Ok(()) => FfiStatus::Ok as u8,
+            Err(err) => u8::from(err),
+        }
+    }));
+
+    outcome.unwrap_or(FfiStatus::PanicCaught as u8)
+}
+
 /// Broadcasts `data` (`data_len` bytes) to the current lobby.
 #[unsafe(no_mangle)]
 pub extern "C" fn relay_client_broadcast(
@@ -435,6 +471,12 @@ pub extern "C" fn relay_client_poll_event(
             Some(RelayClientCallback::LobbyLeft { author_id }) => {
                 unsafe {
                     *out_event = RelayEvent::lobby_left(author_id);
+                }
+                FfiStatus::Ok as u8
+            }
+            Some(RelayClientCallback::LobbyKicked) => {
+                unsafe {
+                    *out_event = RelayEvent::lobby_kicked();
                 }
                 FfiStatus::Ok as u8
             }

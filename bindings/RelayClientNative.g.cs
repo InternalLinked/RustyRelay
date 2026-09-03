@@ -68,6 +68,16 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_close_lobby(RelayClientHandle* handle);
 
         /// <summary>
+        ///  Kicks the client occupying `seat_id` from the current lobby. Host-only
+        ///  on the server side — if the caller isn't currently hosting, the
+        ///  underlying `kick_client` call itself returns `NotAuthorized` rather than
+        ///  this layer rejecting it, so that error still comes back as a normal
+        ///  `SendableError` code (6).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "relay_client_kick_client", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte relay_client_kick_client(RelayClientHandle* handle, ulong seat_id);
+
+        /// <summary>
         ///  Broadcasts `data` (`data_len` bytes) to the current lobby.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "relay_client_broadcast", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

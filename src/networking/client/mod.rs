@@ -3,7 +3,7 @@ use std::{error::Error, fmt, net::SocketAddr};
 use bytes::Bytes;
 use tokio::sync::mpsc::{self, Receiver};
 
-use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket::{self, LobbyBroadcastPacket, LobbyClosePacket, LobbyCreatePacket}, packets::{error_packet::SendableError, lobby::{broadcast::LobbyBroadcast, close::LobbyClose, create::LobbyCreate, join::LobbyJoin, leave::LobbyLeave}}}, server::{StreamHandle, lobby_handler::LobbyState}};
+use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket::{self, LobbyBroadcastPacket, LobbyClosePacket, LobbyCreatePacket, LobbyKickPacket}, packets::{error_packet::SendableError, lobby::{broadcast::LobbyBroadcast, close::LobbyClose, create::LobbyCreate, join::LobbyJoin, kick::LobbyKick, leave::LobbyLeave}}}, server::{StreamHandle, lobby_handler::LobbyState}};
 
 pub mod tcp;
 
@@ -46,7 +46,8 @@ impl Error for RelayHandleError {}
 pub enum RelayClientCallback {
     Broadcast{author_id: usize, buffer: Bytes},
     LobbyJoined{author_id: usize},
-    LobbyLeft{author_id: usize}
+    LobbyLeft{author_id: usize},
+    LobbyKicked,
 
 }
 
@@ -56,6 +57,7 @@ pub struct RelayClient {
     lobby_state: LobbyState,
     broadcast_reader: Receiver<RelayClientCallback>
 }
+
 
 impl RelayClient {
 
@@ -115,7 +117,7 @@ impl RelayClient {
         let packet = LobbyJoin::new(code);
 
 
-        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).unwrap() {
+        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyJoinPacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
 
             AnyPacket::LobbyJoinSuccessPacket(success) => {
 
@@ -140,7 +142,7 @@ impl RelayClient {
 
         let packet = LobbyLeave::new();
 
-        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyLeavePacket(packet)).unwrap() {
+        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyLeavePacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
 
             AnyPacket::LobbyLeaveSuccessPacket(_) => {
                 self.lobby_state = LobbyState::Alone;
@@ -184,11 +186,29 @@ impl RelayClient {
 
     }
 
+    pub fn kick_client(&mut self, seat_id: usize) -> Result<(), SendableError> {
+
+        let LobbyState::Host { lobby_id, code } = self.lobby_state else {
+            return Err(SendableError::NotAuthorized);
+        };
+
+        let packet = LobbyKick::new(seat_id as u64);
+
+        match self.tcp_client.blocking_send_awaitable(LobbyKickPacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
+            AnyPacket::LobbyKickSuccessPacket(_) => {
+                return Ok(());
+            },
+            AnyPacket::RelayErrorPacket(code) =>  return Err(SendableError::try_from(code.read_code()).unwrap()),
+            _ => panic!("Unexpected packet")
+        }
+
+    }
+
     pub fn close_lobby(&mut self) -> Result<(), SendableError> {
 
         let packet = LobbyClose::new();
 
-        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyClosePacket(packet)).unwrap() {
+        match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyClosePacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
 
             AnyPacket::LobbyCloseSuccessPacket(_) => {
 
@@ -201,7 +221,22 @@ impl RelayClient {
     }
 
     pub fn poll_event(&mut self) -> Option<RelayClientCallback> {
-        self.broadcast_reader.blocking_recv()
+
+        /* We check if we got kicked. If so we set the lobby_state to LobbyState::Alone.
+        This comes with the disadvantage that the clients state only gets updated when we poll events as this is the only way currently.
+        The advantage is, that we do not have to open another thread for just listening for the kick event or use another mutext that we have to pass to the handler  */
+
+        let event = self.broadcast_reader.blocking_recv();
+        if let Some(e) = &event {
+            match e {
+                RelayClientCallback::LobbyKicked => {
+                    self.lobby_state = LobbyState::Alone;
+                }
+                _ => ()
+            }
+        }
+
+        event
     }
 
     pub fn close_client(&mut self) {

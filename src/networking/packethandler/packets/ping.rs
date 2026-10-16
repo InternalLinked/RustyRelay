@@ -12,20 +12,7 @@ impl Ping {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
 
 
-        match client_core.lobby_state{
-        
-            LobbyState::Client { lobby_id, seat_id } => {
-
-                
-
-            },
-            _ => {
-
-                client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new(0))).await;
-
-            },
-
-        }
+        client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new())).await;
 
 
         ServerCallback::Pass
@@ -33,7 +20,7 @@ impl Ping {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
-        client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new(0))).await;
+        client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new())).await;
 
         ClientCallback::Pass
     }
@@ -42,7 +29,6 @@ impl Ping {
 
 #[packet_macro::packet(17, true, false, false, 128, 64, 30)]
 pub struct Pong {
-    host_latency: u64
 }
 
 impl Pong {

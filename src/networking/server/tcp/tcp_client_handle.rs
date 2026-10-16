@@ -1,9 +1,13 @@
 use std::io::Error;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::time::Duration;
 
 use bytes::{Buf, Bytes, BytesMut};
 use slab::Slab;
 use snow::{Builder, error};
 use tokio::io::AsyncWriteExt;
+use tokio::time::interval;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::client::tcp::TCPClientHandle;
@@ -12,15 +16,17 @@ use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::{RelayError, SendableError};
 use crate::networking::packethandler::packets::lobby::kick::LobbyClientKick;
 use crate::networking::packethandler::packets::lobby::leave::LobbyLeftEvent;
+use crate::networking::packethandler::packets::ping::{Ping, Pong};
 use crate::networking::server::lobby_handler::LobbyState;
-use crate::util::{ClientContextInstruction};
+use crate::util::{ClientContextInstruction, mono_epoch, now_ms};
 use crate::util::EncryptionState::{Handshake, Unsecure};
-use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}, packets::ack::Ack}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::ServerCallback};
+use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::ServerCallback};
 
 #[derive(Clone)]
 pub struct TCPClientInstanceHandle {
     sender: Sender<ClientContextInstruction>,
     id: usize,
+    latency: Arc<AtomicU64>
 }
 
 impl TCPClientInstanceHandle {
@@ -33,6 +39,9 @@ impl TCPClientInstanceHandle {
         let _ = self.sender.send(ClientContextInstruction::ResetLobbyState).await;    
     }
 
+    pub fn get_latency(&self) -> u64 {
+        self.latency.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 impl StreamHandle for TCPClientInstanceHandle {
@@ -76,15 +85,16 @@ pub struct TCPClientInstanceCore {
     client_handle: TCPClientInstanceHandle,
     awaitable_cache: Slab<oneshot::Sender<AnyPacket>>,
     pub write_buffer: BytesMut,
-    pub counter: usize,
-    pub lobby_state: LobbyState
+    pub lobby_state: LobbyState,
+    pub latency: Arc<AtomicU64>,
+    pub last_ping_timestamp: u64,
 
 }
 
 impl TCPClientInstanceCore {
-    pub fn new(client_handle: TCPClientInstanceHandle) -> Self {
+    pub fn new(client_handle: TCPClientInstanceHandle, latency: Arc<AtomicU64>) -> Self {
 
-        Self {client_handle, awaitable_cache: Slab::new(), lobby_state: LobbyState::Alone, counter: 0, write_buffer: BytesMut::with_capacity(MAX_TCP_LENGTH)}
+        Self {client_handle, awaitable_cache: Slab::new(), lobby_state: LobbyState::Alone, write_buffer: BytesMut::with_capacity(MAX_TCP_LENGTH), latency, last_ping_timestamp: 0}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientInstanceHandle {
@@ -113,38 +123,59 @@ impl TCPClientInstanceCore {
 struct TCPClientContext {
     receiver: Receiver<ClientContextInstruction>,
     lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
+    latency: Arc<AtomicU64>
 }
 
 
 impl TCPClientContext {
     pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
-        let client_handle = TCPClientInstanceHandle { sender, id };
+
+        let latency = Arc::new(AtomicU64::new(0));
+        let clone_lat = latency.clone();
+
+        let client_handle = TCPClientInstanceHandle { sender, latency: latency.clone(), id };
 
         let (read_half, write_half, encryption_handler) = ServerEncryptionLayer::new(stream).await.unwrap();
 
         let mut context = TCPClientContext {
             receiver,
             lobby_manager,
+            latency
         };
-
 
         let client_handle_clone  = client_handle.clone();
 
         tokio::spawn(async move {
-            context.run(client_handle_clone, read_half, write_half, encryption_handler).await;
+            context.run(client_handle_clone, read_half, write_half, encryption_handler, clone_lat).await;
         });
         client_handle
     }
 
-    pub async fn run(&mut self, client_handle: TCPClientInstanceHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler) {
+    pub async fn run(&mut self, client_handle: TCPClientInstanceHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler, latency: Arc<AtomicU64>) {
         /* Really ugly code here but rusts burrowchecker forces me to do this */
 
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut core = TCPClientInstanceCore::new(client_handle);
+        let mut core = TCPClientInstanceCore::new(client_handle, latency);
+
+        let mut ticker = interval(Duration::from_secs(5));
+
+        
 
         loop {
              tokio::select! {
+
+                _ = ticker.tick() => {
+                    
+                    let now = now_ms();
+                    
+                    core.last_ping_timestamp = now;
+
+                    core.client_handle.send(AnyPacket::PingPacket(Ping::new())).await;
+
+                }
+
+
                 callback = read_half.read_frame() => {
 
                     let Ok(buffer) = callback else {

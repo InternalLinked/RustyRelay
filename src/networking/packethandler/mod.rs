@@ -5,7 +5,7 @@ use std::io::{self};
 
 use crate::networking::client::tcp::{TCPClientCore, TCPClientHandle};
 use crate::networking::packethandler::packet::DynamicPacket;
-use crate::networking::packethandler::packets::ack::Ack;
+use crate::networking::packethandler::packets::ping::{Ping, Pong};
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
 use crate::networking::packethandler::packets::lobby::close::{LobbyClose, LobbyCloseSuccess};
@@ -138,7 +138,7 @@ macro_rules! register_packets {
 }
 
 register_packets!(
-    Ack,
+    Ping,
     RelayError,
     LobbyCreate,
     LobbyCreateSuccess,
@@ -154,6 +154,7 @@ register_packets!(
     LobbyLeftEvent,
     LobbyJoinedEvent,
     LobbyKickSuccess,
+    Pong
 );
 
 
@@ -165,6 +166,7 @@ impl TCPClientPacketHandler {
     
 pub async fn handle_packet(bytes: &mut BytesMut, client_core: &mut TCPClientCore, awaitable_cache: &mut Slab<oneshot::Sender<AnyPacket>>) -> ClientCallback{
         loop {
+            
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ClientCallback::Kill,
                 AnyPacket::None => return ClientCallback::Pass,

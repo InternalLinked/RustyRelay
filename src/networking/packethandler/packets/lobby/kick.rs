@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{self, AckPacket, LobbyKickSuccessPacket}, packet::Packet, packets::error_packet::SendableError}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::LobbyKickSuccessPacket, packet::Packet, packets::error_packet::SendableError}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -30,7 +30,7 @@ impl LobbyKick {
                     response.set_awaitable_client();
 
 
-                    client_core.get_client_handle().send(LobbyKickSuccessPacket(response));
+                    client_core.get_client_handle().send(LobbyKickSuccessPacket(response)).await;
 
                 },
                 Err(e) => {

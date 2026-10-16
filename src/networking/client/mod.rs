@@ -73,9 +73,16 @@ impl RelayClient {
         
     }
 
+    pub fn is_host(&self) -> bool {
+        if let LobbyState::Host { lobby_id: _, code: _ } = self.lobby_state {
+            return true;
+        }
+        false
+    }
+
     pub fn create_lobby(&mut self) -> Result<String, SendableError>{
 
-        /* Before sending a packet we first check locally if the client is acutally already host/member */
+        /* Before sending a packet we first check locally if the client is actually already host/member */
         if self.lobby_state != LobbyState::Alone {
         
             return Err(SendableError::AlreadyHostOrMember);

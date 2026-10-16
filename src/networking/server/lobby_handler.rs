@@ -83,22 +83,12 @@ impl<H: StreamHandle> Lobby<H> {
         self.clients.len() >= self.max_clients
     }
 
-     /// Sends `packet` to every client in this lobby (not the host).
-    ///
-    /// # TODO
-    ///
-    /// Placeholder — actual sending mechanics not yet implemented.
     pub async fn broadcast(&mut self, packet: Bytes) {
         for (_seat_id, client) in self.clients.iter_mut() {
             client.send_raw(packet.clone()).await;
         }
     }
 
-    /// Sends `packet` to this lobby's host only.
-    ///
-    /// # TODO
-    ///
-    /// Placeholder — actual sending mechanics not yet implemented.
     pub async fn send_host(&mut self, packet: Bytes) {
         self.host.send_raw(packet).await;
     }

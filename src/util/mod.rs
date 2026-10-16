@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{net::SocketAddr, sync::OnceLock, time::Instant};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use rand::{RngExt, TryRng, rngs::SysRng};
@@ -10,7 +10,10 @@ use crate::networking::packethandler::AnyPacket;
 
 pub const RELAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELAY_VERSION_BYTES: u32 = packed_version!();
+
+
 static NOISE_PARAMS: OnceLock<NoiseParams> = OnceLock::new();
+static MONO_EPOCH: OnceLock<Instant> = OnceLock::new();
 
 pub fn noise_params() -> &'static NoiseParams {
     NOISE_PARAMS.get_or_init(|| {
@@ -20,6 +23,13 @@ pub fn noise_params() -> &'static NoiseParams {
     })
 }
 
+pub fn mono_epoch() -> &'static Instant {
+    MONO_EPOCH.get_or_init(Instant::now)
+}
+
+pub fn now_ms() -> u64 {
+    mono_epoch().elapsed().as_millis() as u64
+}
 
 
 static SERVER_RUNTIME: OnceLock<Runtime> = OnceLock::new();

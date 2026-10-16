@@ -68,6 +68,25 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_close_lobby(RelayClientHandle* handle);
 
         /// <summary>
+        ///  Returns whether this client is currently hosting a lobby.
+        ///
+        ///  Unlike every other exported function, this doesn't return an
+        ///  `FfiStatus` — `RelayClient::is_host` can't fail in Rust (it's a plain
+        ///  `&amp;self` query with no `Result`), so there's nothing meaningful to
+        ///  report beyond the answer itself. A null handle is treated as `false`
+        ///  rather than surfaced as `NullPointer` — there's no separate error
+        ///  channel here to put it in, so don't call this with a null/freed handle
+        ///  and expect to detect that from the return value.
+        ///
+        ///  Returns `1` for true, `0` for false. Deliberately `u8`, not Rust
+        ///  `bool` — C#'s default P/Invoke marshaling for a `bool` return value is
+        ///  a 4-byte Win32 `BOOL`, which doesn't match Rust's 1-byte `bool` and
+        ///  would read past it. `u8` avoids that mismatch entirely.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "relay_client_is_host", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte relay_client_is_host(RelayClientHandle* handle);
+
+        /// <summary>
         ///  Kicks the client occupying `seat_id` from the current lobby. Host-only
         ///  on the server side — if the caller isn't currently hosting, the
         ///  underlying `kick_client` call itself returns `NotAuthorized` rather than

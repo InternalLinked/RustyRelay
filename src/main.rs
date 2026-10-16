@@ -4,11 +4,12 @@ use crate::networking::packethandler::{AnyPacket::LobbyBroadcastPacket, packets:
 use crate::networking::packethandler::packets::lobby::kick::LobbyKick;
 use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
 use crate::networking::client::RelayClient;
+use crate::networking::client::RelayClientCallback;
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, params::NoiseParams};
 use tokio::{net::{TcpStream, windows::named_pipe::PipeMode::Byte}, runtime::Runtime};
 
-use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packets::{ack::Ack, lobby::{create::LobbyCreate, join::LobbyJoin}}}, server::{StreamHandle, tcp::TCPServerCore}};
+use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket, packets::{lobby::{create::LobbyCreate, join::LobbyJoin}}}, server::{StreamHandle, tcp::TCPServerCore}};
 
 
 mod util;
@@ -30,13 +31,15 @@ fn main() {
     println!("Lobby code: {code}");
 
     loop {
-        thread::sleep(Duration::from_millis(1000));
+        match host.poll_event().unwrap() {
 
-        let packet = Bytes::copy_from_slice(b"heyy   test");
-        host.broadcast_lobby(packet).unwrap();
+            RelayClientCallback::LobbyJoined { author_id } => {
+                
+            }
+
+            _ => ()
+        }
     }
-
-    println!("Done");
 
     loop {
         

@@ -369,6 +369,30 @@ pub extern "C" fn relay_client_close_lobby(handle: *mut RelayClientHandle) -> u8
     outcome.unwrap_or(FfiStatus::PanicCaught as u8)
 }
 
+/// Returns whether this client is currently hosting a lobby.
+///
+/// Unlike every other exported function, this doesn't return an
+/// `FfiStatus` — `RelayClient::is_host` can't fail in Rust (it's a plain
+/// `&self` query with no `Result`), so there's nothing meaningful to
+/// report beyond the answer itself. A null handle is treated as `false`
+/// rather than surfaced as `NullPointer` — there's no separate error
+/// channel here to put it in, so don't call this with a null/freed handle
+/// and expect to detect that from the return value.
+///
+/// Returns `1` for true, `0` for false. Deliberately `u8`, not Rust
+/// `bool` — C#'s default P/Invoke marshaling for a `bool` return value is
+/// a 4-byte Win32 `BOOL`, which doesn't match Rust's 1-byte `bool` and
+/// would read past it. `u8` avoids that mismatch entirely.
+#[unsafe(no_mangle)]
+pub extern "C" fn relay_client_is_host(handle: *mut RelayClientHandle) -> u8 {
+    let outcome = catch_unwind(AssertUnwindSafe(|| match unsafe { handle_to_client(handle) } {
+        Some(client) => client.is_host() as u8,
+        None => 0,
+    }));
+
+    outcome.unwrap_or(0)
+}
+
 /// Kicks the client occupying `seat_id` from the current lobby. Host-only
 /// on the server side — if the caller isn't currently hosting, the
 /// underlying `kick_client` call itself returns `NotAuthorized` rather than

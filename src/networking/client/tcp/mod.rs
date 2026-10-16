@@ -1,17 +1,22 @@
 use std::error::Error;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use std::{fmt, net::SocketAddr};
 use std::thread;
 
 use bytes::{Buf, Bytes, BytesMut, buf};
 use slab::Slab;
+use tokio::time::interval;
 use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf}}, select, sync::{mpsc::{self, Receiver, Sender}, oneshot}};
 
 use crate::networking::client::{RelayClientCallback, RelayHandleError};
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler};
 use crate::networking::frame_reader::{FramedReader, FramedWriter};
 use crate::networking::packethandler::TCPClientPacketHandler;
+use crate::networking::packethandler::packets::ping::Ping;
 use crate::networking::server::lobby_handler::LobbyState;
-use crate::util::{ClientCallback, ClientContextInstruction, RELAY_VERSION_BYTES, client_runtime, noise_params};
+use crate::util::{ClientCallback, ClientContextInstruction, RELAY_VERSION_BYTES, client_runtime, noise_params, now_ms};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::{EncryptionState}};
 
 
@@ -19,14 +24,17 @@ pub struct TCPClientCore {
 
     client_handle: TCPClientHandle,
     pub relay_callback_writer: Sender<RelayClientCallback>,
-    pub lobby_state: LobbyState
+    pub lobby_state: LobbyState,
+    pub last_ping_timestamp: u64,
+    pub latency: Arc<AtomicU64>,
+    pub latency_to_host: Arc<AtomicU64>
 
 }
 
 impl TCPClientCore {
-    pub fn new(client_handle: TCPClientHandle, relay_callback_writer: Sender<RelayClientCallback>) -> Self {
+    pub fn new(client_handle: TCPClientHandle, relay_callback_writer: Sender<RelayClientCallback>, latency: Arc<AtomicU64>, latency_to_host: Arc<AtomicU64>) -> Self {
 
-        Self {client_handle, lobby_state: LobbyState::Alone, relay_callback_writer}
+        Self {client_handle, lobby_state: LobbyState::Alone, relay_callback_writer, last_ping_timestamp: 0, latency, latency_to_host}
     }
 
     pub fn get_client_handle(&mut self) -> &mut TCPClientHandle {
@@ -38,7 +46,9 @@ impl TCPClientCore {
 
 #[derive(Clone)]
 pub struct TCPClientHandle {
-    sender: Sender<ClientContextInstruction>
+    sender: Sender<ClientContextInstruction>,
+    latency: Arc<AtomicU64>,
+    latency_to_host: Arc<AtomicU64>
 }
 
 impl StreamHandle for TCPClientHandle {
@@ -88,7 +98,7 @@ impl TCPClientHandle {
             match TcpStream::connect(address).await {
 
                 Ok(stream) => {
-                    let handle = TCPClientContext::instantiate(stream, relay_callback_writer).await;
+                    let handle = TCPClientContext::instantiate(stream, relay_callback_writer, Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))).await;
                     let _ = sender.send(handle);
                 },
                 Err(_) => {
@@ -101,7 +111,6 @@ impl TCPClientHandle {
 
         });
         
-
         receiver
             .blocking_recv()
             .map_err(|_| RelayHandleError::PipeError)?
@@ -126,6 +135,10 @@ impl TCPClientHandle {
         self.sender.blocking_send(ClientContextInstruction::Close).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
+    pub fn get_latency(&self) -> u64 {
+        self.latency.load(Ordering::Relaxed)
+    }
+
 }
 
 
@@ -135,9 +148,9 @@ struct TCPClientContext {
 }
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, relay_callback_writer: Sender<RelayClientCallback>) -> Result<TCPClientHandle, RelayHandleError>{
+    pub async fn instantiate(stream: TcpStream, relay_callback_writer: Sender<RelayClientCallback>, latency: Arc<AtomicU64>, latency_to_host: Arc<AtomicU64>) -> Result<TCPClientHandle, RelayHandleError>{
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(96);
-        let client_handle = TCPClientHandle { sender };
+        let client_handle = TCPClientHandle { sender, latency, latency_to_host};
 
         let (read_half, write_half, encryption_handler) = ClientEncryptionLayer::new(stream).await.map_err(|_| RelayHandleError::HandshakeFailure)?;
 
@@ -161,10 +174,26 @@ impl TCPClientContext {
 
         let mut write_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
         let mut read_buffer = BytesMut::with_capacity(MAX_TCP_LENGTH);
-        let mut core = TCPClientCore::new(client_handle, relay_callback_writer);
+
+        let latency = client_handle.latency.clone();
+        let latency_to_host = client_handle.latency_to_host.clone();
+
+        let mut core = TCPClientCore::new(client_handle, relay_callback_writer, latency, latency_to_host);
+        
+        let mut ticker = interval(Duration::from_secs(5));
 
         loop {
              tokio::select! {
+                _ = ticker.tick() => {
+                    
+                    let now = now_ms();
+                    
+                    core.last_ping_timestamp = now;
+
+                    core.client_handle.send(AnyPacket::PingPacket(Ping::new())).await;
+
+                }
+
                 callback = read_half.read_frame() => {
 
                     let Ok(buffer) = callback else {

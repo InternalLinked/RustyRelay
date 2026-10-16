@@ -142,9 +142,9 @@ impl RelayClient {
     pub fn leave_lobby(&mut self) -> Result<(), SendableError> {
 
         /* We do the same as in create_lobby*/
-        if self.lobby_state != LobbyState::Alone {
+        if self.lobby_state == LobbyState::Alone {
         
-            return Err(SendableError::AlreadyHostOrMember);
+            return Err(SendableError::NoMember);
         }
 
         let packet = LobbyLeave::new();
@@ -168,6 +168,8 @@ impl RelayClient {
         
             return Err(SendableError::NoMember);
         }
+
+        
 
         let packet = {
 

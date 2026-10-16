@@ -21,7 +21,7 @@ impl Ping {
             },
             _ => {
 
-                client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new())).await;
+                client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new(0))).await;
 
             },
 
@@ -33,7 +33,7 @@ impl Ping {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
-        client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new())).await;
+        client_core.get_client_handle().send(AnyPacket::PongPacket(Pong::new(0))).await;
 
         ClientCallback::Pass
     }
@@ -42,7 +42,7 @@ impl Ping {
 
 #[packet_macro::packet(17, true, false, false, 128, 64, 30)]
 pub struct Pong {
-
+    host_latency: u64
 }
 
 impl Pong {
@@ -59,6 +59,11 @@ impl Pong {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
+        let now = now_ms();
+        let latency = now.saturating_sub(client_core.last_ping_timestamp);
+        
+        client_core.latency.store(latency, std::sync::atomic::Ordering::Relaxed);
+
         ClientCallback::Pass
     }
 }

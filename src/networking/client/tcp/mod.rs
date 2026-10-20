@@ -135,6 +135,14 @@ impl TCPClientHandle {
         self.sender.blocking_send(ClientContextInstruction::Close).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
+    /* Non-blocking close for use in Drop: blocking_send would panic inside a runtime and could hang on a full channel */
+    pub fn close_detached(&self) {
+        let sender = self.sender.clone();
+        client_runtime().spawn(async move {
+            let _ = sender.send(ClientContextInstruction::Close).await;
+        });
+    }
+
     pub fn get_latency(&self) -> u64 {
         self.latency.load(Ordering::Relaxed)
     }

@@ -253,3 +253,11 @@ impl RelayClient {
     }
 
 }
+
+impl Drop for RelayClient {
+    fn drop(&mut self) {
+        /* The run loop holds its own sender clone, so the channel never closes on its own.
+        Without an explicit Close the connection task would live forever after the client is dropped */
+        self.tcp_client.close_detached();
+    }
+}

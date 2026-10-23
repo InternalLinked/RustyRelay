@@ -1,7 +1,7 @@
 use crate::{networking::{client::{RelayClientCallback, tcp::{TCPClientCore, TCPClientHandle}}, packethandler::{AnyPacket::self, packet::Packet, packets::{error_packet::{RelayError, SendableError}, lobby::join::LobbyJoinedEvent}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::io::{self};
+use std::{io::{self}, usize};
 
 #[packet_macro::packet(7, true, false, false, 128, 64, 30)]
 pub struct LobbyLeave {
@@ -22,7 +22,7 @@ impl LobbyLeave {
                 /* Notfiy the host that a client left */
                 let mut left_event = LobbyLeftEvent::new(seat_id as u64);
                 let left_event = left_event.encode(&mut client_core.write_buffer).unwrap();
-                let _ = lobby_manager.send_host(lobby_id, left_event).await;
+                lobby_manager.relay_broadcast(lobby_id, left_event).await;
 
                 let mut packet = LobbyLeaveSuccess::new();
                 if self.is_awaitable_client() {
@@ -93,9 +93,23 @@ impl LobbyLeftEvent {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
 
-        if let LobbyState::Host { lobby_id: _, code: _ } = client_core.lobby_state {
 
-            let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbyLeft { author_id: self.read_seat_id() as usize  }).await;
+        match client_core.lobby_state {
+            LobbyState::Host { lobby_id: _, code: _ } => {
+
+                let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbyLeft { author_id: self.read_seat_id() as usize }).await;
+
+            },
+            LobbyState::Client { lobby_id, seat_id }=> {
+                
+                if self.read_seat_id() == seat_id as u64 {
+                    return ClientCallback::Pass;
+                }
+
+                let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbyLeft { author_id: self.read_seat_id() as usize }).await;
+            },
+
+            _ => ()
 
         }
         

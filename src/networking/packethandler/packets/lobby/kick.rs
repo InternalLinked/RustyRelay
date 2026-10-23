@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::LobbyKickSuccessPacket, packet::Packet, packets::error_packet::SendableError}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::LobbyKickSuccessPacket, packet::Packet, packets::{error_packet::SendableError, lobby::leave::LobbyLeftEvent}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -32,6 +32,10 @@ impl LobbyKick {
 
                     client_core.get_client_handle().send(LobbyKickSuccessPacket(response)).await;
 
+                    let mut left_event = LobbyLeftEvent::new(self.read_seat_id() as u64);
+                    let left_event = left_event.encode(&mut client_core.write_buffer).unwrap();
+                    lobby_manager.relay_broadcast(lobby_id, left_event).await;
+
                 },
                 Err(e) => {
 
@@ -54,7 +58,7 @@ impl LobbyKick {
 
 
 
-/* Packet that the client get when it got kicked */
+/* Packet that the client gets when it got kicked */
 #[packet_macro::packet(10, true, false, false, 128, 64, 30)]
 pub struct LobbyClientKick {
 }
@@ -68,8 +72,6 @@ impl LobbyClientKick {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
-        println!("Lobby got closed");
-
         let _ = client_core.relay_callback_writer.send(crate::networking::client::RelayClientCallback::LobbyKicked).await;
 
         client_core.lobby_state = LobbyState::Alone;

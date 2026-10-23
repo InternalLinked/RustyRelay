@@ -93,6 +93,21 @@ impl<H: StreamHandle> Lobby<H> {
         self.host.send_raw(packet).await;
     }
 
+    /// Sends `packet` to every member of this lobby — the host and all clients.
+    ///
+    /// Meant for packets originating from the relay itself (e.g. lobby events), not
+    /// for relaying packets sent by a member.
+    ///
+    /// Every recipient gets a `Bytes::clone` of `packet`, which is only a refcount
+    /// bump: no allocation and no copy of the payload.
+    pub async fn relay_broadcast(&mut self, packet: Bytes) {
+        self.host.send_raw(packet.clone()).await;
+
+        for (_seat_id, client) in self.clients.iter_mut() {
+            client.send_raw(packet.clone()).await;
+        }
+    }
+
     /// Attempts to add `client` to this lobby's client slab, returning its assigned
     /// seat id.
     ///
@@ -193,12 +208,11 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Send `packet` to every client in the lobby identified by `lobby_id`, excluding
     /// the host by design.
     ///
-    /// Replies with `Ok(())` on success, or [`SendableError::LobbyNotFound`] if the
-    /// lobby doesn't exist.
+    /// Fire-and-forget: carries no reply channel, so dispatching it allocates
+    /// nothing. If the lobby doesn't exist the instruction is silently dropped.
     Broadcast {
         lobby_id: usize,
         packet: Bytes,
-        reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Send `packet` to only the host of the lobby identified by `lobby_id`.
     ///
@@ -208,6 +222,15 @@ pub enum LobbyInstruction<H: StreamHandle> {
         lobby_id: usize,
         packet: Bytes,
         reply: oneshot::Sender<Result<(), SendableError>>,
+    },
+    /// Send `packet` to every member of the lobby identified by `lobby_id` — the
+    /// host and all clients. Only issued by the relay itself (e.g. lobby events).
+    ///
+    /// Fire-and-forget: carries no reply channel, so dispatching it allocates
+    /// nothing. If the lobby doesn't exist the instruction is silently dropped.
+    RelayBroadcast {
+        lobby_id: usize,
+        packet: Bytes,
     },
     /// Close (remove) the lobby identified by `lobby_id`, on behalf of `requester_id`.
     ///
@@ -313,19 +336,11 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let _ = reply.send(result);
             }
 
-            LobbyInstruction::Broadcast {
-                lobby_id,
-                packet,
-                reply,
-            } => {
-                let result = match self.lobbies.get_mut(lobby_id) {
-                    Some(lobby) => {
-                        lobby.broadcast(packet).await;
-                        Ok(())
-                    }
-                    None => Err(SendableError::LobbyNotFound),
-                };
-                let _ = reply.send(result);
+            LobbyInstruction::Broadcast { lobby_id, packet } => {
+                /* No reply channel by design, an unknown lobby is just ignored */
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id) {
+                    lobby.broadcast(packet).await;
+                }
             }
 
             LobbyInstruction::SendHost {
@@ -341,6 +356,13 @@ impl<H: StreamHandle> LobbyManager<H> {
                     None => Err(SendableError::LobbyNotFound),
                 };
                 let _ = reply.send(result);
+            }
+
+            LobbyInstruction::RelayBroadcast { lobby_id, packet } => {
+                /* No reply channel by design, an unknown lobby is just ignored */
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id) {
+                    lobby.relay_broadcast(packet).await;
+                }
             }
 
             LobbyInstruction::Leave {
@@ -565,27 +587,19 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     /// Sends `packet` to every client in the lobby identified by `lobby_id`,
     /// excluding the host.
     ///
-    /// # Errors
-    ///
-    /// Returns [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    /// Fire-and-forget: doesn't wait for a reply, so no `oneshot` channel is
+    /// allocated. It returns once the instruction is queued, and a nonexistent lobby
+    /// is silently ignored by the manager.
     ///
     /// # Panics
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn broadcast(&self, lobby_id: usize, packet: Bytes) -> Result<(), SendableError> {
-        let (reply, response) = oneshot::channel();
-
+    pub async fn broadcast(&self, lobby_id: usize, packet: Bytes) {
         self.sender
-            .send(LobbyInstruction::Broadcast {
-                lobby_id,
-                packet,
-                reply,
-            })
+            .send(LobbyInstruction::Broadcast { lobby_id, packet })
             .await
             .expect("LobbyManager task is not running");
-
-        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Sends `packet` to only the host of the lobby identified by `lobby_id`.
@@ -611,6 +625,29 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
             .expect("LobbyManager task is not running");
 
         response.await.expect("LobbyManager dropped reply channel")
+    }
+
+    /// Sends `packet` to every member of the lobby identified by `lobby_id` — the
+    /// host and all clients.
+    ///
+    /// Intended to be called by the relay backend only, for packets the relay itself
+    /// sends to a whole lobby (e.g. when a client joins). It is not meant for
+    /// relaying packets sent by a lobby member; use [`Self::broadcast`] /
+    /// [`Self::send_host`] for that.
+    ///
+    /// Fire-and-forget: doesn't wait for a reply, so no `oneshot` channel is
+    /// allocated. It returns once the instruction is queued, and a nonexistent lobby
+    /// is silently ignored by the manager.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn relay_broadcast(&self, lobby_id: usize, packet: Bytes) {
+        self.sender
+            .send(LobbyInstruction::RelayBroadcast { lobby_id, packet })
+            .await
+            .expect("LobbyManager task is not running");
     }
 
     /// Closes the lobby identified by `lobby_id`, on behalf of `requester_id`.

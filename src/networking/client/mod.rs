@@ -225,7 +225,7 @@ impl RelayClient {
         match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyClosePacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
 
             AnyPacket::LobbyCloseSuccessPacket(_) => {
-
+                self.lobby_state = LobbyState::Alone;
                 Ok(())
             }
             AnyPacket::RelayErrorPacket(code) =>  return Err(SendableError::try_from(code.read_code()).unwrap()),

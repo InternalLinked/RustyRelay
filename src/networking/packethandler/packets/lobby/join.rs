@@ -69,6 +69,7 @@ impl LobbyJoinSuccess {
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
 
         client_core.lobby_state = LobbyState::Client { lobby_id: self.read_lobby_id() as usize, seat_id: self.read_seat_id() as usize };
+        let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbySeatChanged { seat_id: self.read_seat_id() as usize}).await;
         
         ClientCallback::Pass
     }

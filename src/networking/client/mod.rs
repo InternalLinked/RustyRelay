@@ -48,6 +48,7 @@ pub enum RelayClientCallback {
     LobbyJoined{author_id: usize},
     LobbyLeft{author_id: usize},
     LobbyKicked,
+    LobbySeatChanged{seat_id: usize}
 
 }
 

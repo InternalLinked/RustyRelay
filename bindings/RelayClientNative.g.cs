@@ -103,12 +103,12 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_broadcast(RelayClientHandle* handle, byte* data, System.UIntPtr data_len);
 
         /// <summary>
-        ///  Blocks until the next event (broadcast packet, lobby join, or lobby
-        ///  leave) arrives, and writes it into the caller-allocated `*out_event`.
+        ///  Blocks until the next event (broadcast packet, lobby join/leave/kick,
+        ///  or seat change) arrives, and writes it into the caller-allocated `*out_event`.
         ///
         ///  If the written `kind == Broadcast` (0), `data_ptr`/`data_len` describe a
         ///  Rust-allocated buffer you MUST release with `relay_free_buffer` exactly
-        ///  once. For `LobbyJoined`/`LobbyLeft` (1/2), no buffer is allocated —
+        ///  once. For every other `kind` (1..=4), no buffer is allocated —
         ///  there's nothing to free.
         ///
         ///  Call this from a dedicated background thread on the C# side (there's no
@@ -184,7 +184,10 @@ namespace RelayClient.Interop
     ///  variant might need. Fields that don't apply to the current `kind` are
     ///  always zeroed/null rather than left uninitialized.
     ///
-    ///  - `author_id` is populated for every variant.
+    ///  - `author_id` is populated for `Broadcast`/`LobbyJoined`/`LobbyLeft`;
+    ///    it's 0 for `LobbyKicked`/`LobbySeatChanged` and should be ignored.
+    ///  - `seat_id` is ONLY meaningful when `kind == LobbySeatChanged` (4), and
+    ///    is 0 for every other `kind`.
     ///  - `data_ptr`/`data_len` are ONLY meaningful when `kind == Broadcast`
     ///    (0). When populated, the buffer is Rust-allocated and must be
     ///    released via `relay_free_buffer` exactly once — same contract the old
@@ -198,6 +201,7 @@ namespace RelayClient.Interop
         public ulong author_id;
         public byte* data_ptr;
         public System.UIntPtr data_len;
+        public ulong seat_id;
     }
 
 

@@ -74,6 +74,7 @@ impl LobbyLeaveSuccess {
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
         
         client_core.lobby_state = LobbyState::Alone;
+        let _ = client_core.relay_callback_writer.send(RelayClientCallback::LobbySeatChanged { seat_id: 0}).await;
 
         ClientCallback::Pass
     }

@@ -134,6 +134,7 @@ pub enum RelayEventKind {
     LobbyJoined = 1,
     LobbyLeft = 2,
     LobbyKicked = 3,
+    LobbySeatChanged = 4,
 }
 
 /// C-ABI representation of `RelayClientCallback`.
@@ -144,7 +145,10 @@ pub enum RelayEventKind {
 /// variant might need. Fields that don't apply to the current `kind` are
 /// always zeroed/null rather than left uninitialized.
 ///
-/// - `author_id` is populated for every variant.
+/// - `author_id` is populated for `Broadcast`/`LobbyJoined`/`LobbyLeft`;
+///   it's 0 for `LobbyKicked`/`LobbySeatChanged` and should be ignored.
+/// - `seat_id` is ONLY meaningful when `kind == LobbySeatChanged` (4), and
+///   is 0 for every other `kind`.
 /// - `data_ptr`/`data_len` are ONLY meaningful when `kind == Broadcast`
 ///   (0). When populated, the buffer is Rust-allocated and must be
 ///   released via `relay_free_buffer` exactly once — same contract the old
@@ -156,6 +160,7 @@ pub struct RelayEvent {
     pub author_id: u64,
     pub data_ptr: *mut u8,
     pub data_len: usize,
+    pub seat_id: u64,
 }
 
 impl RelayEvent {
@@ -165,6 +170,7 @@ impl RelayEvent {
             author_id: author_id as u64,
             data_ptr,
             data_len,
+            seat_id: 0,
         }
     }
 
@@ -174,6 +180,7 @@ impl RelayEvent {
             author_id: author_id as u64,
             data_ptr: ptr::null_mut(),
             data_len: 0,
+            seat_id: 0,
         }
     }
 
@@ -183,6 +190,7 @@ impl RelayEvent {
             author_id: author_id as u64,
             data_ptr: ptr::null_mut(),
             data_len: 0,
+            seat_id: 0,
         }
     }
 
@@ -196,6 +204,19 @@ impl RelayEvent {
             author_id: 0,
             data_ptr: ptr::null_mut(),
             data_len: 0,
+            seat_id: 0,
+        }
+    }
+
+    /// Sent to this client when its own seat in the lobby changed.
+    /// `author_id` is left at 0 and should be ignored for this `kind`.
+    fn lobby_seat_changed(seat_id: usize) -> Self {
+        Self {
+            kind: RelayEventKind::LobbySeatChanged as u8,
+            author_id: 0,
+            data_ptr: ptr::null_mut(),
+            data_len: 0,
+            seat_id: seat_id as u64,
         }
     }
 
@@ -205,6 +226,7 @@ impl RelayEvent {
             author_id: 0,
             data_ptr: ptr::null_mut(),
             data_len: 0,
+            seat_id: 0,
         }
     }
 }
@@ -447,12 +469,12 @@ pub extern "C" fn relay_client_broadcast(
     outcome.unwrap_or(FfiStatus::PanicCaught as u8)
 }
 
-/// Blocks until the next event (broadcast packet, lobby join, or lobby
-/// leave) arrives, and writes it into the caller-allocated `*out_event`.
+/// Blocks until the next event (broadcast packet, lobby join/leave/kick,
+/// or seat change) arrives, and writes it into the caller-allocated `*out_event`.
 ///
 /// If the written `kind == Broadcast` (0), `data_ptr`/`data_len` describe a
 /// Rust-allocated buffer you MUST release with `relay_free_buffer` exactly
-/// once. For `LobbyJoined`/`LobbyLeft` (1/2), no buffer is allocated —
+/// once. For every other `kind` (1..=4), no buffer is allocated —
 /// there's nothing to free.
 ///
 /// Call this from a dedicated background thread on the C# side (there's no
@@ -501,6 +523,12 @@ pub extern "C" fn relay_client_poll_event(
             Some(RelayClientCallback::LobbyKicked) => {
                 unsafe {
                     *out_event = RelayEvent::lobby_kicked();
+                }
+                FfiStatus::Ok as u8
+            }
+            Some(RelayClientCallback::LobbySeatChanged { seat_id }) => {
+                unsafe {
+                    *out_event = RelayEvent::lobby_seat_changed(seat_id);
                 }
                 FfiStatus::Ok as u8
             }

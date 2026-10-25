@@ -69,7 +69,7 @@ impl RelayClient {
         let (sender, broadcast_reader) = mpsc::channel::<RelayClientCallback>(96);
 
         let tcp_client = TCPClientHandle::new(address, sender)?;
-
+        
         Ok(Self {tcp_client, lobby_state: LobbyState::Alone, broadcast_reader})
         
     }
@@ -79,6 +79,10 @@ impl RelayClient {
             return true;
         }
         false
+    }
+
+    pub fn get_latency(&self) -> u64 {
+        self.tcp_client.get_latency()
     }
 
     pub fn create_lobby(&mut self) -> Result<String, SendableError>{

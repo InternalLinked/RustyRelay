@@ -316,6 +316,8 @@ impl<H: StreamHandle> LobbyManager<H> {
                 /* Insert the Code with the slot id so we can resolve the lobby id by the code */
                 self.code_map.insert(code, lobby_id);
 
+                println!("Created lobby with code {code}");
+
                 /* Send back the slot and code to the host */
                 let _ = reply.send(Ok((lobby_id, code)));
             }

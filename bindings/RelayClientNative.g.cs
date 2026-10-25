@@ -87,6 +87,17 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_is_host(RelayClientHandle* handle);
 
         /// <summary>
+        ///  Returns the latest measured round-trip latency to the relay server, in
+        ///  milliseconds; 0 before the first ping has completed.
+        ///
+        ///  Like `relay_client_is_host`, this returns the value directly rather than
+        ///  an `FfiStatus`: it is a lock-free atomic load that can't fail. A null
+        ///  handle (or a caught panic) yields 0.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "relay_client_get_latency", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong relay_client_get_latency(RelayClientHandle* handle);
+
+        /// <summary>
         ///  Kicks the client occupying `seat_id` from the current lobby. Host-only
         ///  on the server side — if the caller isn't currently hosting, the
         ///  underlying `kick_client` call itself returns `NotAuthorized` rather than

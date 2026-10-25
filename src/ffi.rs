@@ -415,6 +415,22 @@ pub extern "C" fn relay_client_is_host(handle: *mut RelayClientHandle) -> u8 {
     outcome.unwrap_or(0)
 }
 
+/// Returns the latest measured round-trip latency to the relay server, in
+/// milliseconds; 0 before the first ping has completed.
+///
+/// Like `relay_client_is_host`, this returns the value directly rather than
+/// an `FfiStatus`: it is a lock-free atomic load that can't fail. A null
+/// handle (or a caught panic) yields 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn relay_client_get_latency(handle: *mut RelayClientHandle) -> u64 {
+    let outcome = catch_unwind(AssertUnwindSafe(|| match unsafe { handle_to_client(handle) } {
+        Some(client) => client.get_latency(),
+        None => 0,
+    }));
+
+    outcome.unwrap_or(0)
+}
+
 /// Kicks the client occupying `seat_id` from the current lobby. Host-only
 /// on the server side — if the caller isn't currently hosting, the
 /// underlying `kick_client` call itself returns `NotAuthorized` rather than

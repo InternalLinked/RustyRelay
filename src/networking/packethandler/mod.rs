@@ -195,7 +195,12 @@ impl TCPServerPacketHandler {
             match dispatch_packet(bytes) {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
-                mut other => { other.on_trigger_server_tcp(client_core, lobby_manager).await;}
+                mut other => {
+                    match other.on_trigger_server_tcp(client_core, lobby_manager).await {
+                        ServerCallback::Pass => (),
+                        other => return other,
+                    }
+                }
 
             }
         }

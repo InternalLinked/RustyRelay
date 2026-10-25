@@ -33,7 +33,7 @@ impl fmt::Display for RelayHandleError {
                 write!(f, "given address is invalid")
             }
             RelayHandleError::ConnectionClosed => {
-                write!(f, "given address is invalid")
+                write!(f, "the connection to the server was closed")
             }
         }
     }
@@ -220,6 +220,11 @@ impl RelayClient {
 
     pub fn close_lobby(&mut self) -> Result<(), SendableError> {
 
+        /* Only the host can close the lobby, so we check locally before sending */
+        if !self.is_host() {
+            return Err(SendableError::NotAuthorized);
+        }
+
         let packet = LobbyClose::new();
 
         match self.tcp_client.blocking_send_awaitable(AnyPacket::LobbyClosePacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
@@ -245,6 +250,12 @@ impl RelayClient {
             match e {
                 RelayClientCallback::LobbyKicked => {
                     self.lobby_state = LobbyState::Alone;
+                }
+                RelayClientCallback::LobbySeatChanged { seat_id: new_seat_id } => {
+                    /* Only a client has a seat. When we are Alone or Host the event is irrelevant (e.g. seat 0 after leaving) */
+                    if let LobbyState::Client { lobby_id: _, seat_id } = &mut self.lobby_state {
+                        *seat_id = *new_seat_id;
+                    }
                 }
                 _ => ()
             }

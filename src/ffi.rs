@@ -485,6 +485,43 @@ pub extern "C" fn relay_client_broadcast(
     outcome.unwrap_or(FfiStatus::PanicCaught as u8)
 }
 
+/// Sends `data` (`data_len` bytes) to the single client occupying `seat_id`
+/// in the current lobby. Host-only — a lobby member gets `NotAuthorized`
+/// back from the underlying `send_explicit_lobby` call as a normal
+/// `SendableError` code (6). An empty seat is silently ignored by the
+/// server, so this still returns `FfiStatus::Ok` in that case.
+#[unsafe(no_mangle)]
+pub extern "C" fn relay_client_send_explicit(
+    handle: *mut RelayClientHandle,
+    seat_id: u64,
+    data: *const u8,
+    data_len: usize,
+) -> u8 {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let client = match unsafe { handle_to_client(handle) } {
+            Some(c) => c,
+            None => return FfiStatus::NullPointer as u8,
+        };
+        if data.is_null() && data_len > 0 {
+            return FfiStatus::NullPointer as u8;
+        }
+
+        let slice = if data_len == 0 {
+            &[][..]
+        } else {
+            unsafe { slice::from_raw_parts(data, data_len) }
+        };
+        let payload = Bytes::copy_from_slice(slice);
+
+        match client.send_explicit_lobby(seat_id, payload) {
+            Ok(()) => FfiStatus::Ok as u8,
+            Err(err) => u8::from(err),
+        }
+    }));
+
+    outcome.unwrap_or(FfiStatus::PanicCaught as u8)
+}
+
 /// Blocks until the next event (broadcast packet, lobby join/leave/kick,
 /// or seat change) arrives, and writes it into the caller-allocated `*out_event`.
 ///

@@ -114,6 +114,16 @@ namespace RelayClient.Interop
         internal static extern byte relay_client_broadcast(RelayClientHandle* handle, byte* data, System.UIntPtr data_len);
 
         /// <summary>
+        ///  Sends `data` (`data_len` bytes) to the single client occupying `seat_id`
+        ///  in the current lobby. Host-only — a lobby member gets `NotAuthorized`
+        ///  back from the underlying `send_explicit_lobby` call as a normal
+        ///  `SendableError` code (6). An empty seat is silently ignored by the
+        ///  server, so this still returns `FfiStatus::Ok` in that case.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "relay_client_send_explicit", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte relay_client_send_explicit(RelayClientHandle* handle, ulong seat_id, byte* data, System.UIntPtr data_len);
+
+        /// <summary>
         ///  Blocks until the next event (broadcast packet, lobby join/leave/kick,
         ///  or seat change) arrives, and writes it into the caller-allocated `*out_event`.
         ///

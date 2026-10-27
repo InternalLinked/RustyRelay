@@ -60,7 +60,7 @@ impl StreamHandle for TCPClientHandle {
     }
 
     async fn send_raw(&self, packet: Bytes) {
-        if self.sender.blocking_send(ClientContextInstruction::RawPacket { raw_packet: packet }).is_err() {
+        if self.sender.send(ClientContextInstruction::RawPacket { raw_packet: packet }).await.is_err() {
             todo!("Handle closed client");
         }
     }
@@ -81,7 +81,7 @@ impl StreamHandle for TCPClientHandle {
         }
     }
 
-    fn get_id(&self) -> usize {
+    fn get_id(&self) -> u64 {
         0
     }
 }

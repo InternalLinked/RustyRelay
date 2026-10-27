@@ -5,6 +5,7 @@ use std::io::{self};
 
 use crate::networking::client::tcp::{TCPClientCore, TCPClientHandle};
 use crate::networking::packethandler::packet::DynamicPacket;
+use crate::networking::packethandler::packets::lobby::explicit::{LobbyExplicit, LobbyExplicitSuccess};
 use crate::networking::packethandler::packets::ping::{Ping, Pong};
 use crate::networking::packethandler::packets::error_packet::RelayError;
 use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
@@ -154,7 +155,9 @@ register_packets!(
     LobbyLeftEvent,
     LobbyJoinedEvent,
     LobbyKickSuccess,
-    Pong
+    Pong,
+    LobbyExplicit,
+    LobbyExplicitSuccess
 );
 
 

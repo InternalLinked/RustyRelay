@@ -164,30 +164,30 @@ pub struct RelayEvent {
 }
 
 impl RelayEvent {
-    fn broadcast(author_id: usize, data_ptr: *mut u8, data_len: usize) -> Self {
+    fn broadcast(author_id: u64, data_ptr: *mut u8, data_len: usize) -> Self {
         Self {
             kind: RelayEventKind::Broadcast as u8,
-            author_id: author_id as u64,
+            author_id,
             data_ptr,
             data_len,
             seat_id: 0,
         }
     }
 
-    fn lobby_joined(author_id: usize) -> Self {
+    fn lobby_joined(author_id: u64) -> Self {
         Self {
             kind: RelayEventKind::LobbyJoined as u8,
-            author_id: author_id as u64,
+            author_id,
             data_ptr: ptr::null_mut(),
             data_len: 0,
             seat_id: 0,
         }
     }
 
-    fn lobby_left(author_id: usize) -> Self {
+    fn lobby_left(author_id: u64) -> Self {
         Self {
             kind: RelayEventKind::LobbyLeft as u8,
-            author_id: author_id as u64,
+            author_id,
             data_ptr: ptr::null_mut(),
             data_len: 0,
             seat_id: 0,
@@ -210,13 +210,13 @@ impl RelayEvent {
 
     /// Sent to this client when its own seat in the lobby changed.
     /// `author_id` is left at 0 and should be ignored for this `kind`.
-    fn lobby_seat_changed(seat_id: usize) -> Self {
+    fn lobby_seat_changed(seat_id: u64) -> Self {
         Self {
             kind: RelayEventKind::LobbySeatChanged as u8,
             author_id: 0,
             data_ptr: ptr::null_mut(),
             data_len: 0,
-            seat_id: seat_id as u64,
+            seat_id,
         }
     }
 
@@ -444,7 +444,7 @@ pub extern "C" fn relay_client_kick_client(handle: *mut RelayClientHandle, seat_
             None => return FfiStatus::NullPointer as u8,
         };
 
-        match client.kick_client(seat_id as usize) {
+        match client.kick_client(seat_id) {
             Ok(()) => FfiStatus::Ok as u8,
             Err(err) => u8::from(err),
         }

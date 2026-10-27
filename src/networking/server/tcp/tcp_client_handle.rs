@@ -25,12 +25,12 @@ use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, pac
 #[derive(Clone)]
 pub struct TCPClientInstanceHandle {
     sender: Sender<ClientContextInstruction>,
-    id: usize,
+    id: u64,
     latency: Arc<AtomicU64>
 }
 
 impl TCPClientInstanceHandle {
-    pub async fn new(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
+    pub async fn new(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
 
@@ -74,7 +74,7 @@ impl StreamHandle for TCPClientInstanceHandle {
         }
     }
 
-    fn get_id(&self) -> usize {
+    fn get_id(&self) -> u64 {
         self.id
     }
 }
@@ -128,7 +128,7 @@ struct TCPClientContext {
 
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, id: usize, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
+    pub async fn instantiate(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
 
         let latency = Arc::new(AtomicU64::new(0));
@@ -278,11 +278,11 @@ impl TCPClientContext {
             LobbyState::Host { lobby_id, code: _ } => {
                 let _ = self.lobby_manager.close(lobby_id, core.get_client_handle().get_id()).await;
             },
-            LobbyState::Client { lobby_id, seat_id } => {
+            LobbyState::Member { lobby_id, seat_id } => {
                 let _ = self.lobby_manager.leave(lobby_id, seat_id).await;
                 
                 /* Notify lobby that client left */
-                let mut left_event = LobbyLeftEvent::new(seat_id as u64);
+                let mut left_event = LobbyLeftEvent::new(seat_id);
                 let left_event = left_event.encode(&mut core.write_buffer).unwrap();
                 let _ = self.lobby_manager.send_host(lobby_id, left_event).await;
 

@@ -32,25 +32,29 @@ pub enum LobbyState {
     /// Not currently hosting or a member of any lobby.
     Alone,
     /// Hosting the lobby identified by `lobby_id`.
-    Host { lobby_id: usize, code: u64 },
+    Host { lobby_id: u64, code: u64 },
     /// A client (non-host member) of the lobby identified by `lobby_id`, occupying
     /// seat `seat_id`.
-    Client { lobby_id: usize, seat_id: usize },
+    Member { lobby_id: u64, seat_id: u64 },
 }
 
 // ============================================================
 // Lobby<H>
 // ============================================================
 
+/// Seat the host always occupies in [`Lobby::members`]. It is inserted first and
+/// [`Lobby::remove_client`] refuses to remove it.
+pub const HOST_SEAT: u64 = 0;
+
 /// A single lobby: one host connection plus a bounded set of client connections,
 /// reachable by other players via `code`.
 pub struct Lobby<H: StreamHandle> {
     /// The connection that created and owns this lobby.
-    host: H,
+    host_id: u64,
     /// Randomly generated code other players can use to look up this lobby.
     code: u64,
-    /// Connected (non-host) clients, keyed by seat id.
-    clients: Slab<H>,
+    /// Every member of this lobby keyed by seat id. The host always sits on [`HOST_SEAT`].
+    members: Slab<H>,
     /// Maximum number of clients (excluding the host) this lobby will accept.
     max_clients: usize,
 }
@@ -59,38 +63,58 @@ impl<H: StreamHandle> Lobby<H> {
     /// Creates a new lobby owned by `host`, reachable via `code`, accepting at most
     /// `max_clients` non-host clients.
     pub fn new(host: H, code: u64, max_clients: usize) -> Self {
-        Self {
-            host,
+        let mut lobby = Self {
+            host_id: host.get_id(),
             code,
-            clients: Slab::new(),
+            members: Slab::new(),
             max_clients,
-        }
+        };
+        //Adding host first so that the host gets index 0 (the internal lobby id). Host must always be 0
+
+        lobby.members.insert(host);
+        lobby
     }
 
     /// Returns the connection id of this lobby's host.
-    pub fn host_id(&self) -> usize {
-        self.host.get_id()
+    pub fn host_id(&self) -> u64 {
+        self.host_id
     }
 
     /// Returns `true` if `client_id` is this lobby's host.
-    pub fn is_host(&self, client_id: usize) -> bool {
-        self.host.get_id() == client_id
+    pub fn is_host(&self, client_id: u64) -> bool {
+        self.host_id == client_id
     }
 
     /// Returns `true` if the lobby currently holds `max_clients` clients and cannot
     /// accept any more.
     pub fn is_full(&self) -> bool {
-        self.clients.len() >= self.max_clients
+        /* members also holds the host, which does not count towards max_clients */
+        self.members.len() - 1 >= self.max_clients
     }
 
     pub async fn broadcast(&mut self, packet: Bytes) {
-        for (_seat_id, client) in self.clients.iter_mut() {
+        for (_seat_id, client) in self.members.iter_mut().skip(1) {
             client.send_raw(packet.clone()).await;
         }
     }
 
     pub async fn send_host(&mut self, packet: Bytes) {
-        self.host.send_raw(packet).await;
+        /* This unwrap is fine. As 0 always is the host and never gets removed */
+        self.members.get(0).unwrap().send_raw(packet).await;
+    }
+
+    /// Sends `packet` to only the client occupying `seat_id`. The host on
+    /// [`HOST_SEAT`] is excluded by design, the same way [`Self::broadcast`] excludes it.
+    ///
+    /// An empty seat is silently ignored.
+    pub async fn send_explicit(&mut self, seat_id: u64, packet: Bytes) {
+        if seat_id == HOST_SEAT {
+            return;
+        }
+
+        if let Some(client) = self.members.get_mut(seat_id as usize) {
+            client.send_raw(packet).await;
+        }
     }
 
     /// Sends `packet` to every member of this lobby — the host and all clients.
@@ -101,9 +125,8 @@ impl<H: StreamHandle> Lobby<H> {
     /// Every recipient gets a `Bytes::clone` of `packet`, which is only a refcount
     /// bump: no allocation and no copy of the payload.
     pub async fn relay_broadcast(&mut self, packet: Bytes) {
-        self.host.send_raw(packet.clone()).await;
-
-        for (_seat_id, client) in self.clients.iter_mut() {
+        
+        for (_seat_id, client) in self.members.iter_mut() {
             client.send_raw(packet.clone()).await;
         }
     }
@@ -114,27 +137,28 @@ impl<H: StreamHandle> Lobby<H> {
     /// # Errors
     ///
     /// Returns [`SendableError::LobbyFull`] if the lobby is already at `max_clients`.
-    pub fn add_client(&mut self, client: H) -> Result<usize, SendableError> {
+    pub fn add_client(&mut self, client: H) -> Result<u64, SendableError> {
         if self.is_full() {
             return Err(SendableError::LobbyFull);
         }
-        Ok(self.clients.insert(client))
+        Ok(self.members.insert(client) as u64)
     }
 
     /// Removes and returns the client occupying `slot`, if any client is currently
-    /// occupying it.
-    pub fn remove_client(&mut self, slot: usize) -> Option<H> {
+    /// occupying it. The host on [`HOST_SEAT`] is never removed, the lobby has to be
+    /// closed instead.
+    pub fn remove_client(&mut self, slot: u64) -> Option<H> {
         println!("Removing client");
-        if self.clients.contains(slot) {
-            Some(self.clients.remove(slot))
+        if slot != HOST_SEAT && self.members.contains(slot as usize) {
+            Some(self.members.remove(slot as usize))
         } else {
             None
         }
     }
 
     /// Returns `true` if `slot` currently has a client occupying it.
-    pub fn contains_slot(&self, slot: usize) -> bool {
-        self.clients.contains(slot)
+    pub fn contains_slot(&self, slot: u64) -> bool {
+        self.members.contains(slot as usize)
     }
 
     pub async fn kick_all_clients(&mut self) {
@@ -147,7 +171,7 @@ impl<H: StreamHandle> Lobby<H> {
         //if this crashes something absolutely went wrong (should not happen);
         let enc = packet.encode(&mut buffer).unwrap();
 
-        for (_seat_id, client) in self.clients.iter_mut() {
+        for (_seat_id, client) in self.members.iter_mut().skip(1) {
             println!("Kicking {_seat_id}");
             client.send_raw(enc.clone()).await;
         }
@@ -167,7 +191,7 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// [`SendableError::MaxLobbiesExceded`] if the manager is at capacity.
     Create {
         host: H,
-        reply: oneshot::Sender<Result<(usize, u64), SendableError>>,
+        reply: oneshot::Sender<Result<(u64, u64), SendableError>>,
     },
     /// Add `client` to the lobby whose join code is `code`.
     ///
@@ -181,15 +205,15 @@ pub enum LobbyInstruction<H: StreamHandle> {
     Join {
         code: u64,
         client: H,
-        reply: oneshot::Sender<Result<(usize, usize), SendableError>>,
+        reply: oneshot::Sender<Result<(u64, u64), SendableError>>,
     },
     /// Remove the client at `seat_id` from the lobby identified by `lobby_id`.
     ///
     /// Replies with `Ok(())` on success (including if `seat_id` was already empty),
     /// or [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
     Leave {
-        lobby_id: usize,
-        seat_id: usize,
+        lobby_id: u64,
+        seat_id: u64,
         reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Remove the client at `target_seat` from the lobby identified by `lobby_id`,
@@ -200,9 +224,9 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// [`SendableError::LobbyNotFound`] if the lobby doesn't exist, or
     /// [`SendableError::SeatNotFound`] if `target_seat` was not occupied.
     Kick {
-        lobby_id: usize,
-        requester_id: usize,
-        target_seat: usize,
+        lobby_id: u64,
+        requester_id: u64,
+        target_seat: u64,
         reply: oneshot::Sender<Result<H, SendableError>>,
     },
     /// Send `packet` to every client in the lobby identified by `lobby_id`, excluding
@@ -211,7 +235,18 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Fire-and-forget: carries no reply channel, so dispatching it allocates
     /// nothing. If the lobby doesn't exist the instruction is silently dropped.
     Broadcast {
-        lobby_id: usize,
+        lobby_id: u64,
+        packet: Bytes,
+    },
+    /// Send `packet` to only the client at `seat_id` in the lobby identified by
+    /// `lobby_id`, excluding the host by design.
+    ///
+    /// Fire-and-forget: carries no reply channel, so dispatching it allocates
+    /// nothing. If the lobby doesn't exist or the seat is empty the instruction is
+    /// silently dropped.
+    SendExplicit {
+        lobby_id: u64,
+        seat_id: u64,
         packet: Bytes,
     },
     /// Send `packet` to only the host of the lobby identified by `lobby_id`.
@@ -219,7 +254,7 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Replies with `Ok(())` on success, or [`SendableError::LobbyNotFound`] if the
     /// lobby doesn't exist.
     SendHost {
-        lobby_id: usize,
+        lobby_id: u64,
         packet: Bytes,
         reply: oneshot::Sender<Result<(), SendableError>>,
     },
@@ -229,7 +264,7 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Fire-and-forget: carries no reply channel, so dispatching it allocates
     /// nothing. If the lobby doesn't exist the instruction is silently dropped.
     RelayBroadcast {
-        lobby_id: usize,
+        lobby_id: u64,
         packet: Bytes,
     },
     /// Close (remove) the lobby identified by `lobby_id`, on behalf of `requester_id`.
@@ -237,8 +272,8 @@ pub enum LobbyInstruction<H: StreamHandle> {
     /// Replies with [`SendableError::NotAuthorized`] if `requester_id` is not the
     /// lobby's host, or [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
     Close {
-        lobby_id: usize,
-        requester_id: usize,
+        lobby_id: u64,
+        requester_id: u64,
         reply: oneshot::Sender<Result<(), SendableError>>,
     },
 }
@@ -258,7 +293,7 @@ pub struct LobbyManager<H: StreamHandle> {
     lobbies: Slab<Lobby<H>>,
     /// Maps a lobby's join code to its `lobby_id`, so [`LobbyInstruction::Join`] can
     /// resolve a code to the lobby it refers to.
-    code_map: HashMap<u64, usize>,
+    code_map: HashMap<u64, u64>,
     /// Channel this manager receives [`LobbyInstruction`]s from.
     receiver: Receiver<LobbyInstruction<H>>,
     /// Maximum number of lobbies this manager will allow to exist at once.
@@ -311,7 +346,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 let code = random_code();
 
                 let lobby = Lobby::new(host, code, self.max_clients_per_lobby);
-                let lobby_id = self.lobbies.insert(lobby);
+                let lobby_id = self.lobbies.insert(lobby) as u64;
 
                 /* Insert the Code with the slot id so we can resolve the lobby id by the code */
                 self.code_map.insert(code, lobby_id);
@@ -329,7 +364,7 @@ impl<H: StreamHandle> LobbyManager<H> {
             } => {
                 /* Resolve the join code to a lobby id, then look up the lobby itself */
                 let result = match self.code_map.get(&code) {
-                    Some(&lobby_id) => match self.lobbies.get_mut(lobby_id) {
+                    Some(&lobby_id) => match self.lobbies.get_mut(lobby_id as usize) {
                         Some(lobby) => lobby.add_client(client).map(|seat_id| (lobby_id, seat_id)),
                         None => Err(SendableError::LobbyNotFound),
                     },
@@ -340,8 +375,19 @@ impl<H: StreamHandle> LobbyManager<H> {
 
             LobbyInstruction::Broadcast { lobby_id, packet } => {
                 /* No reply channel by design, an unknown lobby is just ignored */
-                if let Some(lobby) = self.lobbies.get_mut(lobby_id) {
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id as usize) {
                     lobby.broadcast(packet).await;
+                }
+            }
+
+            LobbyInstruction::SendExplicit {
+                lobby_id,
+                seat_id,
+                packet,
+            } => {
+                /* No reply channel by design, an unknown lobby or empty seat is just ignored */
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id as usize) {
+                    lobby.send_explicit(seat_id, packet).await;
                 }
             }
 
@@ -350,7 +396,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 packet,
                 reply,
             } => {
-                let result = match self.lobbies.get_mut(lobby_id) {
+                let result = match self.lobbies.get_mut(lobby_id as usize) {
                     Some(lobby) => {
                         lobby.send_host(packet).await;
                         Ok(())
@@ -362,7 +408,7 @@ impl<H: StreamHandle> LobbyManager<H> {
 
             LobbyInstruction::RelayBroadcast { lobby_id, packet } => {
                 /* No reply channel by design, an unknown lobby is just ignored */
-                if let Some(lobby) = self.lobbies.get_mut(lobby_id) {
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id as usize) {
                     lobby.relay_broadcast(packet).await;
                 }
             }
@@ -372,7 +418,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 seat_id,
                 reply,
             } => {
-                let result = match self.lobbies.get_mut(lobby_id) {
+                let result = match self.lobbies.get_mut(lobby_id as usize) {
                     Some(lobby) => {
                         lobby.remove_client(seat_id);
                         Ok(())
@@ -388,7 +434,7 @@ impl<H: StreamHandle> LobbyManager<H> {
                 target_seat,
                 reply,
             } => {
-                let result = match self.lobbies.get_mut(lobby_id) {
+                let result = match self.lobbies.get_mut(lobby_id as usize) {
                     Some(lobby) => {
                         if !lobby.is_host(requester_id) {
                             Err(SendableError::NotAuthorized)
@@ -423,8 +469,8 @@ impl<H: StreamHandle> LobbyManager<H> {
     ///
     /// Returns [`SendableError::LobbyNotFound`] if no such lobby exists, or
     /// [`SendableError::NotAuthorized`] if `requester_id` isn't the lobby's host.
-    async fn close_lobby(&mut self, lobby_id: usize, requester_id: usize) -> Result<(), SendableError> {
-        let Some(lobby) = self.lobbies.get_mut(lobby_id) else {
+    async fn close_lobby(&mut self, lobby_id: u64, requester_id: u64) -> Result<(), SendableError> {
+        let Some(lobby) = self.lobbies.get_mut(lobby_id as usize) else {
             return Err(SendableError::LobbyNotFound);
         };
 
@@ -434,7 +480,7 @@ impl<H: StreamHandle> LobbyManager<H> {
 
         lobby.kick_all_clients().await;
         self.code_map.remove(&lobby.code);
-        self.lobbies.remove(lobby_id);
+        self.lobbies.remove(lobby_id as usize);
         Ok(())
     }
 }
@@ -485,7 +531,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn create(&self, host: H) -> Result<(usize, u64), SendableError> {
+    pub async fn create(&self, host: H) -> Result<(u64, u64), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -510,7 +556,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn join(&self, code: u64, client: H) -> Result<(usize, usize), SendableError> {
+    pub async fn join(&self, code: u64, client: H) -> Result<(u64, u64), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -535,7 +581,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn leave(&self, lobby_id: usize, seat_id: usize) -> Result<(), SendableError> {
+    pub async fn leave(&self, lobby_id: u64, seat_id: u64) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -567,9 +613,9 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     /// long as the server).
     pub async fn kick(
         &self,
-        lobby_id: usize,
-        requester_id: usize,
-        target_seat: usize,
+        lobby_id: u64,
+        requester_id: u64,
+        target_seat: u64,
     ) -> Result<H, SendableError> {
         let (reply, response) = oneshot::channel();
 
@@ -597,9 +643,31 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn broadcast(&self, lobby_id: usize, packet: Bytes) {
+    pub async fn broadcast(&self, lobby_id: u64, packet: Bytes) {
         self.sender
             .send(LobbyInstruction::Broadcast { lobby_id, packet })
+            .await
+            .expect("LobbyManager task is not running");
+    }
+
+    /// Sends `packet` to only the client at `seat_id` in the lobby identified by
+    /// `lobby_id`, excluding the host.
+    ///
+    /// Fire-and-forget: doesn't wait for a reply, so no `oneshot` channel is
+    /// allocated. It returns once the instruction is queued, and a nonexistent lobby
+    /// or empty seat is silently ignored by the manager.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
+    /// long as the server).
+    pub async fn send_explicit(&self, lobby_id: u64, seat_id: u64, packet: Bytes) {
+        self.sender
+            .send(LobbyInstruction::SendExplicit {
+                lobby_id,
+                seat_id,
+                packet,
+            })
             .await
             .expect("LobbyManager task is not running");
     }
@@ -614,7 +682,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn send_host(&self, lobby_id: usize, packet: Bytes) -> Result<(), SendableError> {
+    pub async fn send_host(&self, lobby_id: u64, packet: Bytes) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 
         self.sender
@@ -645,7 +713,7 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn relay_broadcast(&self, lobby_id: usize, packet: Bytes) {
+    pub async fn relay_broadcast(&self, lobby_id: u64, packet: Bytes) {
         self.sender
             .send(LobbyInstruction::RelayBroadcast { lobby_id, packet })
             .await
@@ -665,8 +733,8 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
     /// long as the server).
     pub async fn close(
         &self,
-        lobby_id: usize,
-        requester_id: usize,
+        lobby_id: u64,
+        requester_id: u64,
     ) -> Result<(), SendableError> {
         let (reply, response) = oneshot::channel();
 

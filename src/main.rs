@@ -22,10 +22,9 @@ fn main() {
 
 
     TCPServerCore::run("127.0.0.1:25565".parse().unwrap());
+    println!("Server started successfully!");
 
 
-    loop {
-        
-    }
+    thread::park()
 
 }

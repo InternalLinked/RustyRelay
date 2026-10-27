@@ -27,7 +27,7 @@ impl LobbyCreate {
             Ok((lobby_id, code)) => {
                 client_core.lobby_state = LobbyState::Host { lobby_id, code };
 
-                let mut packet = LobbyCreateSuccess::new(lobby_id as u64, code);
+                let mut packet = LobbyCreateSuccess::new(lobby_id, code);
                 if self.is_awaitable_client() {
                     packet.set_awaitable_client();
                     packet.set_nonce(self.get_nonce());
@@ -70,7 +70,7 @@ impl LobbyCreateSuccess {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
 
-        client_core.lobby_state = LobbyState::Host { lobby_id: self.read_lobby_id() as usize, code: self.read_lobby_code() };
+        client_core.lobby_state = LobbyState::Host { lobby_id: self.read_lobby_id(), code: self.read_lobby_code() };
         
         ClientCallback::Pass
     }

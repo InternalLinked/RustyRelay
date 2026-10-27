@@ -1,4 +1,4 @@
-use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::LobbyKickSuccessPacket, packet::Packet, packets::{error_packet::SendableError, lobby::leave::LobbyLeftEvent}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::tcp::{TCPClientCore, TCPClientHandle}, packethandler::{AnyPacket::{LobbyCloseSuccessPacket, LobbyKickSuccessPacket}, packet::Packet, packets::{error_packet::SendableError, lobby::{close::LobbyCloseSuccess, leave::LobbyLeftEvent}}}, server::{StreamHandle, lobby_handler::{HOST_SEAT, LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
@@ -16,10 +16,36 @@ impl LobbyKick {
         
         if let LobbyState::Host { lobby_id, code: _ } = client_core.lobby_state {
             let requester_id = client_core.get_client_handle().get_id();
-            match lobby_manager.kick(lobby_id, requester_id, self.read_seat_id() as usize).await {
+
+            /* The host always sits on HOST_SEAT. If it kicks itself the lobby gets closed instead,
+            otherwise the lobby would be left without a host */
+            if self.read_seat_id() == HOST_SEAT {
+                if let Err(e) = lobby_manager.close(lobby_id, requester_id).await {
+                    client_core.send_client_error(self, e).await;
+                    return ServerCallback::Pass;
+                }
+
+                client_core.lobby_state = LobbyState::Alone;
+
+                let mut packet = LobbyCloseSuccess::new();
+                if self.is_awaitable_client() {
+                    packet.set_awaitable_client();
+                    packet.set_nonce(self.get_nonce());
+                }
+
+                client_core.get_client_handle().send(LobbyCloseSuccessPacket(packet)).await;
+                return ServerCallback::Pass;
+            }
+
+            match lobby_manager.kick(lobby_id, requester_id, self.read_seat_id()).await {
                 Ok(mut lobby_client) => {
                     lobby_client.reset_lobby_state().await;
-                    
+
+                    /* Notify the lobby that the client left. Has to happen before the awaitable check,
+                    otherwise the lobby never hears about non-awaitable kicks */
+                    let mut left_event = LobbyLeftEvent::new(self.read_seat_id());
+                    let left_event = left_event.encode(&mut client_core.write_buffer).unwrap();
+                    lobby_manager.relay_broadcast(lobby_id, left_event).await;
 
                     if !self.is_awaitable_client() {
                         return ServerCallback::Pass;
@@ -31,10 +57,6 @@ impl LobbyKick {
 
 
                     client_core.get_client_handle().send(LobbyKickSuccessPacket(response)).await;
-
-                    let mut left_event = LobbyLeftEvent::new(self.read_seat_id() as u64);
-                    let left_event = left_event.encode(&mut client_core.write_buffer).unwrap();
-                    lobby_manager.relay_broadcast(lobby_id, left_event).await;
 
                 },
                 Err(e) => {

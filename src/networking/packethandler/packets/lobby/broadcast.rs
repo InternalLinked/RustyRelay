@@ -21,11 +21,11 @@ impl LobbyBroadcast {
                     client_core.get_client_handle().send(AnyPacket::RelayErrorPacket(error)).await;
                 }
             },
-            LobbyState::Client { lobby_id, seat_id } => {
+            LobbyState::Member { lobby_id, seat_id } => {
 
                 /* Checking if the seat id of the instance matches with the id sent by the Client. If not the Client is probably 
                 trying to impersonate another client. If that is the case the connection gets killed */
-                if seat_id != self.read_author() as usize {
+                if seat_id != self.read_author() {
 
                     /* The entire reson for doing this so "clunky" is, that we can just pass the recieved bytes to the host without copying or alloacting once */
                     client_core.send_client_error(self, SendableError::NotAuthorized).await;
@@ -50,15 +50,12 @@ impl LobbyBroadcast {
 
     pub async fn on_trigger_client_tcp(&self, client_core: &mut TCPClientCore) -> ClientCallback{
 
-
-        let s = str::from_utf8(self.get_dynamic()).unwrap();
-
         match client_core.lobby_state {
-            LobbyState::Client { lobby_id, seat_id } => {
+            LobbyState::Member { lobby_id, seat_id } => {
                 let _ = client_core.relay_callback_writer.send(RelayClientCallback::Broadcast { author_id: 0, buffer: self.get_dynamic().clone() }).await;
             },
             LobbyState::Host { lobby_id, code } => {
-                let _ = client_core.relay_callback_writer.send(RelayClientCallback::Broadcast { author_id: self.read_author() as usize, buffer: self.get_dynamic().clone() }).await;
+                let _ = client_core.relay_callback_writer.send(RelayClientCallback::Broadcast { author_id: self.read_author(), buffer: self.get_dynamic().clone() }).await;
             },
             _ => ()
 

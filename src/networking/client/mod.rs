@@ -3,7 +3,7 @@ use std::{error::Error, fmt, net::SocketAddr};
 use bytes::Bytes;
 use tokio::sync::mpsc::{self, Receiver};
 
-use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket::{self, LobbyBroadcastPacket, LobbyClosePacket, LobbyCreatePacket, LobbyKickPacket}, packets::{error_packet::SendableError, lobby::{broadcast::LobbyBroadcast, close::LobbyClose, create::LobbyCreate, join::LobbyJoin, kick::LobbyKick, leave::LobbyLeave}}}, server::{StreamHandle, lobby_handler::LobbyState}};
+use crate::networking::{client::tcp::TCPClientHandle, packethandler::{AnyPacket::{self, LobbyBroadcastPacket, LobbyClosePacket, LobbyCreatePacket, LobbyKickPacket}, packets::{error_packet::SendableError, lobby::{broadcast::LobbyBroadcast, close::LobbyClose, create::LobbyCreate, explicit::LobbyExplicit, join::LobbyJoin, kick::LobbyKick, leave::LobbyLeave}}}, server::{StreamHandle, lobby_handler::LobbyState}};
 
 pub mod tcp;
 
@@ -44,11 +44,11 @@ impl Error for RelayHandleError {}
 
 
 pub enum RelayClientCallback {
-    Broadcast{author_id: usize, buffer: Bytes},
-    LobbyJoined{author_id: usize},
-    LobbyLeft{author_id: usize},
+    Broadcast{author_id: u64, buffer: Bytes},
+    LobbyJoined{author_id: u64},
+    LobbyLeft{author_id: u64},
     LobbyKicked,
-    LobbySeatChanged{seat_id: usize}
+    LobbySeatChanged{seat_id: u64}
 
 }
 
@@ -98,7 +98,7 @@ impl RelayClient {
         match self.tcp_client.blocking_send_awaitable(LobbyCreatePacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
             AnyPacket::LobbyCreateSuccessPacket(success) => {
                 let bytes = success.read_lobby_code().to_be_bytes();
-                self.lobby_state = LobbyState::Host { lobby_id: success.read_lobby_id() as usize, code: success.read_lobby_code() };
+                self.lobby_state = LobbyState::Host { lobby_id: success.read_lobby_id(), code: success.read_lobby_code() };
                 return Ok(String::from_utf8(bytes.to_vec()).unwrap());
 
             },
@@ -133,7 +133,7 @@ impl RelayClient {
 
             AnyPacket::LobbyJoinSuccessPacket(success) => {
 
-                self.lobby_state = LobbyState::Client { lobby_id: success.read_lobby_id() as usize, seat_id: success.read_seat_id() as usize };
+                self.lobby_state = LobbyState::Member { lobby_id: success.read_lobby_id(), seat_id: success.read_seat_id() };
 
                 Ok(())
             }
@@ -179,10 +179,10 @@ impl RelayClient {
         let packet = {
 
             match self.lobby_state {
-                LobbyState::Client { lobby_id: _, seat_id } => {
+                LobbyState::Member { lobby_id: _, seat_id } => {
                     /* We do send or current seat id so that the host can check which client sent 
                     the package. If the seat id is worng the current client gets kicked entirely from the server */
-                    LobbyBroadcast::new(seat_id as u64, packet)
+                    LobbyBroadcast::new(seat_id, packet)
                 }
                 LobbyState::Host { lobby_id: _, code: _ } => {
                     /* If the broadcast is send by the Host the auther (seat_id) is completely irrelevant */
@@ -200,16 +200,52 @@ impl RelayClient {
 
     }
 
-    pub fn kick_client(&mut self, seat_id: usize) -> Result<(), SendableError> {
+
+    pub fn send_explicit_lobby(&mut self, seat_id: u64, packet: Bytes) -> Result<(), SendableError>{
+
+        /* Check if the client is alone*/
+        if self.lobby_state == LobbyState::Alone {
+        
+            return Err(SendableError::NoMember);
+        }
+        
+        let packet = {
+
+            match self.lobby_state {
+                LobbyState::Member { lobby_id: _, seat_id: _ } => {
+                    return Err(SendableError::NotAuthorized);
+                }
+                LobbyState::Host { lobby_id: _, code: _ } => {
+
+                    LobbyExplicit::new(seat_id, packet)
+                }
+
+                _ => panic!("Thats impossible. Never happens"),
+
+            }
+
+        };
+
+        self.tcp_client.blocking_send(AnyPacket::LobbyExplicitPacket(packet)).map_err(|_| SendableError::ConnectionClose)?;
+        Ok(())
+
+    }
+
+    pub fn kick_client(&mut self, seat_id: u64) -> Result<(), SendableError> {
 
         let LobbyState::Host { lobby_id, code } = self.lobby_state else {
             return Err(SendableError::NotAuthorized);
         };
 
-        let packet = LobbyKick::new(seat_id as u64);
+        let packet = LobbyKick::new(seat_id);
 
         match self.tcp_client.blocking_send_awaitable(LobbyKickPacket(packet)).map_err(|_| SendableError::ConnectionClose)? {
             AnyPacket::LobbyKickSuccessPacket(_) => {
+                return Ok(());
+            },
+            /* Kicking our own seat makes the relay close the lobby */
+            AnyPacket::LobbyCloseSuccessPacket(_) => {
+                self.lobby_state = LobbyState::Alone;
                 return Ok(());
             },
             AnyPacket::RelayErrorPacket(code) =>  return Err(SendableError::try_from(code.read_code()).unwrap()),
@@ -244,7 +280,7 @@ impl RelayClient {
         /* We check if we got kicked. If so we set the lobby_state to LobbyState::Alone.
         This comes with the disadvantage that the clients state only gets updated when we poll events as this is the only way currently.
         The advantage is, that we do not have to open another thread for just listening for the kick event or use another mutext that we have to pass to the handler  */
-
+        
         let event = self.broadcast_reader.blocking_recv();
         if let Some(e) = &event {
             match e {
@@ -253,7 +289,7 @@ impl RelayClient {
                 }
                 RelayClientCallback::LobbySeatChanged { seat_id: new_seat_id } => {
                     /* Only a client has a seat. When we are Alone or Host the event is irrelevant (e.g. seat 0 after leaving) */
-                    if let LobbyState::Client { lobby_id: _, seat_id } = &mut self.lobby_state {
+                    if let LobbyState::Member { lobby_id: _, seat_id } = &mut self.lobby_state {
                         *seat_id = *new_seat_id;
                     }
                 }

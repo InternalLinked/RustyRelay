@@ -17,5 +17,5 @@ pub trait StreamHandle: Send + 'static {
 
     fn close(&self) -> impl Future<Output = ()> + Send;
 
-    fn get_id(&self) -> usize;
+    fn get_id(&self) -> u64;
 }

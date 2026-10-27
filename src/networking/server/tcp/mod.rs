@@ -10,7 +10,7 @@ use crate::{networking::server::{lobby_handler::{LobbyManager, LobbyManagerHandl
 pub struct TCPServerCore {
     listener: TcpListener,
     lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>,
-    next_id: usize,
+    next_id: u64,
 }
 
 impl TCPServerCore {

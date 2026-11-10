@@ -1,4 +1,4 @@
-use crate::{networking::{client::{RelayClientCallback, tcp::{TCPClientCore, TCPClientHandle}}, packethandler::{AnyPacket::self, packet::Packet, packets::{error_packet::{RelayError, SendableError}, lobby::join::LobbyJoinedEvent}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
+use crate::{networking::{client::{RelayClientCallback, tcp::{TCPClientCore, TCPClientHandle}}, packethandler::{AnyPacket::self, packet::Packet, packets::{error_packet::{RelayError, SendableError}, lobby::{close::LobbyCloseSuccess, join::LobbyJoinedEvent}}}, server::{StreamHandle, lobby_handler::{LobbyManagerHandle, LobbyState}, tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle}}}, util::{ClientCallback, ServerCallback}};
 use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self};
@@ -47,7 +47,22 @@ impl LobbyLeave {
             },
 
             LobbyState::Host { lobby_id, code } => {
-                todo!("Handle leave call by host")
+                if let Err(e) = lobby_manager.close(lobby_id, client_core.get_client_handle().get_id()).await {
+                    client_core.send_client_error(self, e).await;
+                    return ServerCallback::Pass;
+                };
+
+                let mut left_event = LobbyLeftEvent::new(0);
+                let left_event = left_event.encode(&mut client_core.write_buffer).unwrap();
+                lobby_manager.relay_broadcast(lobby_id, left_event).await;
+
+                let mut packet = LobbyCloseSuccess::new();
+                if self.is_awaitable_client() {
+                    packet.set_awaitable_client();
+                    packet.set_nonce(self.get_nonce());
+                }
+
+                client_core.get_client_handle().send(AnyPacket::LobbyCloseSuccessPacket(packet)).await;
             }
             
         }

@@ -34,11 +34,6 @@ impl TCPClientInstanceHandle {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
 
-    /* Is used when a client gets kicked */
-    pub async fn reset_lobby_state(&mut self) {
-        let _ = self.sender.send(ClientContextInstruction::ResetLobbyState).await;    
-    }
-
     pub fn get_latency(&self) -> u64 {
         self.latency.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -72,6 +67,12 @@ impl StreamHandle for TCPClientInstanceHandle {
         if self.sender.send(ClientContextInstruction::Close).await.is_err() {
             todo!("Handle closed server");
         }
+    }
+
+    /* Is used when a client gets kicked or the lobby it is in gets closed. The client may already be
+    gone, then there is no state left to reset, so a closed channel is ignored */
+    async fn reset_lobby_state(&self) {
+        let _ = self.sender.send(ClientContextInstruction::ResetLobbyState).await;
     }
 
     fn get_id(&self) -> u64 {

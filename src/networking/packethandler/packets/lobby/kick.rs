@@ -38,7 +38,7 @@ impl LobbyKick {
             }
 
             match lobby_manager.kick(lobby_id, requester_id, self.read_seat_id()).await {
-                Ok(mut lobby_client) => {
+                Ok(lobby_client) => {
                     lobby_client.reset_lobby_state().await;
 
                     /* Notify the lobby that the client left. Has to happen before the awaitable check,

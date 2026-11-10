@@ -81,6 +81,9 @@ impl StreamHandle for TCPClientHandle {
         }
     }
 
+    /* The client handle never sits in a server side lobby, so there is nothing to reset */
+    async fn reset_lobby_state(&self) {}
+
     fn get_id(&self) -> u64 {
         0
     }

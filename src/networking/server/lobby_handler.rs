@@ -9,15 +9,14 @@
 
 use std::collections::HashMap;
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use slab::Slab;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use crate::networking::packethandler::AnyPacket;
-use crate::networking::packethandler::packet::Packet;
 use crate::networking::packethandler::packets::error_packet::SendableError;
-use crate::networking::packethandler::packets::lobby::kick::{LobbyClientKick, LobbyKick};
+use crate::networking::packethandler::packets::lobby::kick::LobbyKick;
 use crate::networking::server::StreamHandle;
 use crate::util::random_code;
 
@@ -162,18 +161,15 @@ impl<H: StreamHandle> Lobby<H> {
     }
 
     pub async fn kick_all_clients(&mut self) {
-        //Just allocating here as this enpoint is not often getting called compared to other endpoints
         println!("Kicking all clients");
-        let mut buffer = BytesMut::with_capacity(24);
 
-        let mut packet = LobbyClientKick::new();
-
-        //if this crashes something absolutely went wrong (should not happen);
-        let enc = packet.encode(&mut buffer).unwrap();
-
+        /* Same path as a single kick: resetting the lobby state also sends the LobbyClientKick packet.
+        Only sending the packet would leave the server side state of every member on this (closed) lobby,
+        so every following join would fail with AlreadyHostOrMember */
+        /* iter_mut, as a &H held across the await would require H: Sync */
         for (_seat_id, client) in self.members.iter_mut().skip(1) {
             println!("Kicking {_seat_id}");
-            client.send_raw(enc.clone()).await;
+            client.reset_lobby_state().await;
         }
     }
 }

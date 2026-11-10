@@ -17,5 +17,8 @@ pub trait StreamHandle: Send + 'static {
 
     fn close(&self) -> impl Future<Output = ()> + Send;
 
+    /* Removes the connection from its lobby on its own side and notifies the client that it got kicked */
+    fn reset_lobby_state(&self) -> impl Future<Output = ()> + Send;
+
     fn get_id(&self) -> u64;
 }

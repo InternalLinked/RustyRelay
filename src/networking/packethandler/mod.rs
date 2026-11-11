@@ -27,6 +27,15 @@ use packet_handler_macro::{dispatch_packet_impl
     
 macro_rules! register_packets {
     ($($packet:ident),* $(,)?) => {
+        /// Number of packet types registered via `register_packets!`.
+        pub const REGISTERED_PACKET_COUNT: usize = [$(stringify!($packet)),*].len();
+
+        /// IDs of all registered packets, in registration order.
+        pub const REGISTERED_PACKET_IDS: [u8; REGISTERED_PACKET_COUNT] = [$($packet::ID),*];
+
+        /// Names of all registered packets, in registration order.
+        pub const REGISTERED_PACKET_NAMES: [&str; REGISTERED_PACKET_COUNT] = [$(stringify!($packet)),*];
+
         paste::paste! {
             pub enum AnyPacket {
                 None,
@@ -37,6 +46,11 @@ macro_rules! register_packets {
             }
 
             impl AnyPacket {
+                /// Number of registered packet types (excludes the internal `None` / `Kill` variants).
+                pub const fn registered_count() -> usize {
+                    REGISTERED_PACKET_COUNT
+                }
+
                 pub fn get_id(&self) -> u8 {
                     match self {
                         $(
@@ -279,4 +293,37 @@ impl UDPClientPacketHandler {
 
 pub fn dispatch_packet(bytes: &mut BytesMut) -> AnyPacket {
     dispatch_packet!(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registered_count_matches_ids() {
+        assert_eq!(AnyPacket::registered_count(), REGISTERED_PACKET_IDS.len());
+    }
+
+    #[test]
+    fn packet_ids_are_unique() {
+        let mut seen: [Option<&str>; 256] = [None; 256];
+        let mut duplicates = Vec::new();
+
+        for (name, id) in REGISTERED_PACKET_NAMES.iter().zip(REGISTERED_PACKET_IDS.iter()) {
+            match seen[*id as usize] {
+                Some(other) => duplicates.push(format!("id {id}: {other} and {name}")),
+                None => seen[*id as usize] = Some(name),
+            }
+        }
+
+        assert!(duplicates.is_empty(), "Duplicate packet IDs: {duplicates:?}");
+    }
+
+    #[test]
+    fn packet_id_zero_is_reserved() {
+        // `AnyPacket::get_id` returns 0 for `None` / `Kill`, so no real packet may use it.
+        for (name, id) in REGISTERED_PACKET_NAMES.iter().zip(REGISTERED_PACKET_IDS.iter()) {
+            assert_ne!(*id, 0, "{name} uses reserved packet id 0");
+        }
+    }
 }

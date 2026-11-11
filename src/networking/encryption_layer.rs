@@ -2,8 +2,7 @@ use std::{error, fs::read, io::{self, Error}};
 
 use bytes::{Bytes, BytesMut};
 use snow::{Builder, HandshakeState, params::NoiseParams};
-use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}, windows::named_pipe::PipeMode::Byte};
-
+use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use crate::{networking::{frame_reader::{FramedReader, FramedWriter}, packethandler::packet::MAX_TCP_LENGTH}, util::{EncryptionState, noise_params}};
 
 

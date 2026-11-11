@@ -94,6 +94,34 @@ macro_rules! register_packets {
                     }
                 }
 
+                pub async fn on_trigger_server_udp(&mut self) {
+                    let owned = std::mem::replace(self, AnyPacket::None);
+                   
+                    match owned {
+                        $(
+                        AnyPacket::[<$packet Packet>](p) => {
+                            p.on_trigger_server_udp().await;
+                        },
+                        )*
+                        _ => ()
+                    }
+                }
+
+
+                pub async fn on_trigger_client_udp(&mut self) {
+                    let owned = std::mem::replace(self, AnyPacket::None);
+                   
+                    match owned {
+                        $(
+                        AnyPacket::[<$packet Packet>](p) => {
+                            p.on_trigger_server_udp().await;
+                        },
+                        )*
+                        _ => ()
+                    }
+                }
+
+
                 pub fn encode(&mut self, buf: &mut BytesMut) -> io::Result<Bytes> {
                     match self {
                         $(
@@ -209,6 +237,45 @@ impl TCPServerPacketHandler {
         }
     }
 }
+
+pub struct UDPServerPacketHandler;
+
+impl UDPServerPacketHandler {
+
+    pub async fn handle_packet(bytes: &mut BytesMut) -> ServerCallback {
+
+        loop {
+
+            match dispatch_packet(bytes) {
+                AnyPacket::Kill => return ServerCallback::Kill,
+                AnyPacket::None => return ServerCallback::Pass,
+                mut other => other.on_trigger_client_udp().await
+                
+
+            }
+        }
+    }
+
+}
+
+pub struct UDPClientPacketHandler;
+
+impl UDPClientPacketHandler {
+
+    pub async fn handle_packet(bytes: &mut BytesMut) -> ClientCallback {
+
+        loop {
+
+            match dispatch_packet(bytes) {
+                AnyPacket::Kill => return ClientCallback::Kill,
+                AnyPacket::None => return ClientCallback::Pass,
+                mut other => other.on_trigger_client_udp().await
+            
+            }
+        }
+    }
+}
+
 
 pub fn dispatch_packet(bytes: &mut BytesMut) -> AnyPacket {
     dispatch_packet!(bytes)

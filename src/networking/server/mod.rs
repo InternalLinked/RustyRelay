@@ -5,6 +5,7 @@ use bytes::Bytes;
 use crate::networking::packethandler::AnyPacket;
 
 pub mod tcp;
+pub mod udp;
 pub mod lobby_handler;
 
 

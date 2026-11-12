@@ -37,7 +37,13 @@ impl TCPServerCore {
 
             let (stream, address) = self.listener.accept().await?;
             println!("[Server] New connection from {}", address);
-            TCPClientInstanceHandle::new(stream, self.next_id, self.lobby_manager.clone()).await;
+            /* The handshake runs on its own task, so a slow or silent peer can't stall the accept loop
+            and a failed handshake only drops that one connection */
+            let id = self.next_id;
+            let lobby_manager = self.lobby_manager.clone();
+            tokio::spawn(async move {
+                TCPClientInstanceHandle::new(stream, id, lobby_manager).await;
+            });
             self.next_id += 1;
 
         }

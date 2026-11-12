@@ -23,6 +23,9 @@ use crate::util::{ClientContextInstruction, mono_epoch, now_ms};
 use crate::util::EncryptionState::{Handshake, Unsecure};
 use crate::{networking::{packethandler::{ AnyPacket, TCPServerPacketHandler, packet::{MAX_TCP_LENGTH, Packet}}, server::{StreamHandle, lobby_handler::LobbyManagerHandle}}, util::ServerCallback};
 
+/* How long a freshly accepted peer gets to complete the Noise handshake */
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 pub struct TCPClientInstanceHandle {
     sender: Sender<ClientContextInstruction>,
@@ -31,7 +34,8 @@ pub struct TCPClientInstanceHandle {
 }
 
 impl TCPClientInstanceHandle {
-    pub async fn new(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Self {
+    /* Returns None if the encryption handshake fails or the peer does not complete it in time */
+    pub async fn new(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Option<Self> {
         TCPClientContext::instantiate(stream, id, lobby_manager).await
     }
 
@@ -130,15 +134,29 @@ struct TCPClientContext {
 
 
 impl TCPClientContext {
-    pub async fn instantiate(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> TCPClientInstanceHandle {
+    pub async fn instantiate(stream: TcpStream, id: u64, lobby_manager: LobbyManagerHandle<TCPClientInstanceHandle>) -> Option<TCPClientInstanceHandle> {
+        /* Handshake first, so nothing gets allocated for peers that never finish it. The timeout stops
+        a peer that connects and stays silent from holding the socket (and this task) forever */
+        let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, ServerEncryptionLayer::new(stream)).await;
+
+        let (read_half, write_half, encryption_handler) = match handshake {
+            Ok(Ok(layer)) => layer,
+            Ok(Err(())) => {
+                println!("[Server] Id: {id} handshake failed");
+                return None;
+            }
+            Err(_) => {
+                println!("[Server] Id: {id} handshake timed out");
+                return None;
+            }
+        };
+
         let (sender, receiver) = mpsc::channel::<ClientContextInstruction>(32);
 
         let latency = Arc::new(AtomicU64::new(0));
         let clone_lat = latency.clone();
 
         let client_handle = TCPClientInstanceHandle { sender, latency: latency.clone(), id };
-
-        let (read_half, write_half, encryption_handler) = ServerEncryptionLayer::new(stream).await.unwrap();
 
         let mut context = TCPClientContext {
             receiver,
@@ -151,7 +169,7 @@ impl TCPClientContext {
         tokio::spawn(async move {
             context.run(client_handle_clone, read_half, write_half, encryption_handler, clone_lat).await;
         });
-        client_handle
+        Some(client_handle)
     }
 
     pub async fn run(&mut self, client_handle: TCPClientInstanceHandle, mut read_half: FramedReader<OwnedReadHalf>, mut write_half: FramedWriter<OwnedWriteHalf>, mut encryption_handler: EncryptionHandler, latency: Arc<AtomicU64>) {

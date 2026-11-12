@@ -55,8 +55,11 @@ impl EncryptionHandler {
         match &mut self.encryption_state {
             EncryptionState::Encrypted(encrypt) => {
                 out.resize(msg.len() + 16, 0);
+                /* Fails e.g. if the message is larger than a Noise message may be. That is reported as an
+                error instead of a panic, so the caller can close the connection cleanly */
                 let len = encrypt
-                    .write_message(&msg[..msg.len()], &mut out[..]).unwrap_or_else(|e| panic!("write_message failed: {:?}, msg.len()={}, buf.len()={}", e, msg.len(), out.len()));
+                    .write_message(&msg[..msg.len()], &mut out[..])
+                    .map_err(|_| EncryptionError::EncryptionFailed)?;
 
                 Ok(len)
             }

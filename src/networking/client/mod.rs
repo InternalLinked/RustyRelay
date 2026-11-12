@@ -174,7 +174,10 @@ impl RelayClient {
             return Err(SendableError::NoMember);
         }
 
-        
+        /* Anything bigger would not fit into one encrypted frame and could never be sent */
+        if packet.len() > LobbyBroadcast::MAX_DYNAMIC_SIZE {
+            return Err(SendableError::PayloadTooLarge);
+        }
 
         let packet = {
 
@@ -208,7 +211,12 @@ impl RelayClient {
         
             return Err(SendableError::NoMember);
         }
-        
+
+        /* Anything bigger would not fit into one encrypted frame and could never be sent */
+        if packet.len() > LobbyExplicit::MAX_DYNAMIC_SIZE {
+            return Err(SendableError::PayloadTooLarge);
+        }
+
         let packet = {
 
             match self.lobby_state {

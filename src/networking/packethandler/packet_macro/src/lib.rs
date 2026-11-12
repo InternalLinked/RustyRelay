@@ -321,6 +321,19 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote::quote! { None }
     };
 
+    // Largest dynamic payload that still fits in one encrypted frame: the
+    // frame limit minus the AEAD tag minus this packet's fixed part. Derived
+    // from the packet layout, so it stays correct when fields change.
+    let max_dynamic_size_const = if is_dynamic {
+        quote::quote! {
+            pub const MAX_DYNAMIC_SIZE: usize = crate::networking::frame_reader::MAX_FRAME_LEN as usize
+                - crate::networking::frame_reader::NOISE_TAG_LEN
+                - Self::CAPACITY;
+        }
+    } else {
+        quote::quote! {}
+    };
+
     let dynamic_impl = if is_dynamic {
         quote::quote! { impl DynamicPacket for #struct_name {} }
     } else {
@@ -387,6 +400,7 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub const MAX_CACHE: usize = #max_cache;
             pub const CACHE_THRESHOLD: usize = #cache_threshold;
             pub const TIMEOUT: usize = #timeout;
+            #max_dynamic_size_const
         }
 
         impl Packet for #struct_name {

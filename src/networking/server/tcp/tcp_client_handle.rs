@@ -12,7 +12,7 @@ use tokio::{io::{self, AsyncReadExt}, net::{TcpStream, tcp::{OwnedReadHalf, Owne
 
 use crate::networking::client::tcp::TCPClientHandle;
 use crate::networking::encryption_layer::{ClientEncryptionLayer, EncryptionHandler, ServerEncryptionLayer};
-use crate::networking::frame_reader::{FramedReader, FramedWriter};
+use crate::networking::frame_reader::{FrameError, FramedReader, FramedWriter};
 use crate::networking::packethandler::packets::error_packet::{RelayError, SendableError};
 use crate::networking::packethandler::packets::lobby::kick::LobbyClientKick;
 use crate::networking::packethandler::packets::lobby::leave::LobbyLeftEvent;
@@ -198,8 +198,15 @@ impl TCPClientContext {
 
                 callback = read_half.read_frame() => {
 
-                    let Ok(buffer) = callback else {
-                        break;
+                    /* Any frame error ends the loop, which drops both socket halves and closes the
+                    connection. An oversized frame is a protocol violation, so it gets logged explicitly */
+                    let buffer = match callback {
+                        Ok(buffer) => buffer,
+                        Err(FrameError::FrameTooLarge(len)) => {
+                            println!("[Server] Id: {} sent oversized frame ({len} bytes), closing connection", core.client_handle.get_id());
+                            break;
+                        }
+                        Err(_) => break,
                     };
 
                     let Ok(len) = encryption_handler.decrypt(&buffer, &mut read_buffer) else {

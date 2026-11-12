@@ -51,6 +51,9 @@ pub enum SendableError {
     SeatNotFound = 7,
     /// If the client is not hosting or part of a lobby to perfom action
     NoMember = 8,
-    RessourceRateLimited = 9
+    RessourceRateLimited = 9,
+    /// The payload does not fit into a single encrypted frame (see the packet's
+    /// `MAX_DYNAMIC_SIZE`). Produced client-side before anything is sent.
+    PayloadTooLarge = 10
 
 }

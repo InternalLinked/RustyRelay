@@ -327,6 +327,23 @@ pub fn dispatch_packet(bytes: &mut BytesMut) -> AnyPacket {
 mod tests {
     use super::*;
 
+    /* A payload of exactly MAX_DYNAMIC_SIZE must encode + encrypt into a frame of exactly MAX_FRAME_LEN.
+    Guards the limit against layout changes (new fields, different tag size) drifting out of sync */
+    #[test]
+    fn max_dynamic_size_fills_exactly_one_frame() {
+        use crate::networking::frame_reader::{MAX_FRAME_LEN, NOISE_TAG_LEN};
+
+        let payload = Bytes::from(vec![0u8; LobbyBroadcast::MAX_DYNAMIC_SIZE]);
+        let mut packet = LobbyBroadcast::new(0, payload);
+        let encoded = packet.encode(&mut BytesMut::new()).unwrap();
+        assert_eq!(encoded.len() + NOISE_TAG_LEN, MAX_FRAME_LEN as usize);
+
+        let payload = Bytes::from(vec![0u8; LobbyExplicit::MAX_DYNAMIC_SIZE]);
+        let mut packet = LobbyExplicit::new(0, payload);
+        let encoded = packet.encode(&mut BytesMut::new()).unwrap();
+        assert_eq!(encoded.len() + NOISE_TAG_LEN, MAX_FRAME_LEN as usize);
+    }
+
     #[test]
     fn registered_count_matches_ids() {
         assert_eq!(AnyPacket::registered_count(), REGISTERED_PACKET_IDS.len());

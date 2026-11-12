@@ -9,7 +9,7 @@
 //! ## Status code convention
 //! Every operation returns a `u8`:
 //! - `255` (`FfiStatus::Ok`)      -> success
-//! - `0..=8`                      -> passed straight through from `SendableError`
+//! - `0..=10`                     -> passed straight through from `SendableError`
 //!                                    (see that enum's doc comments for meaning)
 //! - `100..=199`                  -> FFI/connection-level errors that have no
 //!                                    `SendableError` equivalent (see `FfiStatus`)
@@ -43,6 +43,8 @@ use bytes::Bytes;
 
 use crate::networking::client::{RelayClient, RelayClientCallback, RelayHandleError};
 use crate::networking::packethandler::packets::error_packet::SendableError;
+use crate::networking::packethandler::packets::lobby::broadcast::LobbyBroadcast;
+use crate::networking::packethandler::packets::lobby::explicit::LobbyExplicit;
 
 /// Opaque handle representing a connected `RelayClient`, as seen from the
 /// FFI boundary.
@@ -92,7 +94,7 @@ unsafe fn handle_into_box(handle: *mut RelayClientHandle) -> Box<RelayClient> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FfiStatus {
     /// The call succeeded. Chosen to sit well outside `SendableError`'s
-    /// 0..=8 range so the two error domains never collide.
+    /// 0..=10 range so the two error domains never collide.
     Ok = 255,
 
     // --- errors specific to `RelayClient::connect`, mapped from RelayHandleError ---
@@ -468,6 +470,10 @@ pub extern "C" fn relay_client_broadcast(
         if data.is_null() && data_len > 0 {
             return FfiStatus::NullPointer as u8;
         }
+        /* Checked before the copy below, so an oversized buffer is rejected without copying it */
+        if data_len > LobbyBroadcast::MAX_DYNAMIC_SIZE {
+            return SendableError::PayloadTooLarge as u8;
+        }
 
         let slice = if data_len == 0 {
             &[][..]
@@ -504,6 +510,10 @@ pub extern "C" fn relay_client_send_explicit(
         };
         if data.is_null() && data_len > 0 {
             return FfiStatus::NullPointer as u8;
+        }
+        /* Checked before the copy below, so an oversized buffer is rejected without copying it */
+        if data_len > LobbyExplicit::MAX_DYNAMIC_SIZE {
+            return SendableError::PayloadTooLarge as u8;
         }
 
         let slice = if data_len == 0 {

@@ -5,7 +5,15 @@ use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}, net::TcpSt
 
 use crate::networking::packethandler::packet::MAX_TCP_LENGTH;
 
-pub const MAX_FRAME_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
+/* Every frame on the wire is a single Noise message (handshake or transport), and Noise caps
+messages at 65535 bytes, so anything bigger can never be valid. Keeping this low also stops an
+unauthenticated peer from making FramedReader reserve megabytes per connection by just sending
+a large length header */
+pub const MAX_FRAME_LEN: u32 = 65535;
+
+/* Bytes the AEAD tag adds to every encrypted transport message. A frame is plaintext + tag, so
+the largest plaintext packet that fits in a frame is MAX_FRAME_LEN - NOISE_TAG_LEN */
+pub const NOISE_TAG_LEN: usize = 16;
  
 const READ_CHUNK: usize = MAX_TCP_LENGTH;
 

@@ -30,7 +30,7 @@ impl TCPServerCore {
         });
     }
 
-    async fn listen(&mut self) -> std::io::Result<()>  {
+    async fn listen(&mut self) -> std::io::Result<()> {
 
 
         loop {

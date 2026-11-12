@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
 use std::{io::{self}, thread::{self, Thread}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
-#[packet_macro::packet(1, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(0, true, false, 128, 64, 30)]
 pub struct Ping {
 }
 
@@ -27,7 +27,7 @@ impl Ping {
 }
 
 
-#[packet_macro::packet(17, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(16, true, false, 128, 64, 30)]
 pub struct Pong {
 }
 

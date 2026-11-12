@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io::{self};
 
-#[packet_macro::packet(2, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(1, true, false, 128, 64, 30)]
 pub struct RelayError {
     code: u8,
 }
@@ -50,6 +50,7 @@ pub enum SendableError {
     /// The lobby was found, but the given seat was not occupied by any client.
     SeatNotFound = 7,
     /// If the client is not hosting or part of a lobby to perfom action
-    NoMember = 8
+    NoMember = 8,
+    RessourceRateLimited = 9
 
 }

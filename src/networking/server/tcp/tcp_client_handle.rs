@@ -17,6 +17,7 @@ use crate::networking::packethandler::packets::error_packet::{RelayError, Sendab
 use crate::networking::packethandler::packets::lobby::kick::LobbyClientKick;
 use crate::networking::packethandler::packets::lobby::leave::LobbyLeftEvent;
 use crate::networking::packethandler::packets::ping::{Ping, Pong};
+use crate::networking::ratecache::RateCache;
 use crate::networking::server::lobby_handler::LobbyState;
 use crate::util::{ClientContextInstruction, mono_epoch, now_ms};
 use crate::util::EncryptionState::{Handshake, Unsecure};
@@ -161,7 +162,7 @@ impl TCPClientContext {
 
         let mut ticker = interval(Duration::from_secs(5));
 
-        
+        let mut rate_limiter = RateCache::new();
 
         loop {
              tokio::select! {
@@ -188,7 +189,7 @@ impl TCPClientContext {
                         break;
                     };
 
-                    match TCPServerPacketHandler::handle_packet(&mut read_buffer.split_to(len), &mut core, &mut self.lobby_manager).await {
+                    match TCPServerPacketHandler::handle_packet(&mut read_buffer.split_to(len), &mut rate_limiter, &mut core, &mut self.lobby_manager).await {
                         ServerCallback::Kill => {
                             println!("[Server] Handler instructed to kill.");
                             break;

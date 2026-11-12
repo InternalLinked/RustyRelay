@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::sync::broadcast::error::SendError;
 use std::io::{self};
 
-#[packet_macro::packet(3, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(2, true, false, 128, 64, 30)]
 pub struct LobbyCreate {
     
 }
@@ -14,8 +14,6 @@ impl LobbyCreate {
         /* Handeling create lobby */
         /*Check if the client is already a host or a member of a lobby */
         if client_core.lobby_state != LobbyState::Alone {
-            
-
 
             client_core.send_client_error(self, SendableError::AlreadyHostOrMember).await;
 
@@ -56,7 +54,7 @@ impl LobbyCreate {
 }
 
 
-#[packet_macro::packet(4, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(3, true, false, 128, 64, 30)]
 pub struct LobbyCreateSuccess {
     lobby_id: u64,
     lobby_code: u64

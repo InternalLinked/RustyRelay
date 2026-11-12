@@ -2,9 +2,11 @@ pub mod packet;
 pub mod packets;
 
 use std::io::{self};
+use std::time::Duration;
 
 use crate::networking::client::tcp::{TCPClientCore, TCPClientHandle};
 use crate::networking::packethandler::packet::DynamicPacket;
+use crate::networking::packethandler::packets::error_packet::SendableError::RessourceRateLimited;
 use crate::networking::packethandler::packets::lobby::explicit::{LobbyExplicit, LobbyExplicitSuccess};
 use crate::networking::packethandler::packets::ping::{Ping, Pong};
 use crate::networking::packethandler::packets::error_packet::RelayError;
@@ -14,6 +16,7 @@ use crate::networking::packethandler::packets::lobby::create::{LobbyCreate, Lobb
 use crate::networking::packethandler::packets::lobby::join::{LobbyJoin, LobbyJoinSuccess, LobbyJoinedEvent};
 use crate::networking::packethandler::packets::lobby::kick::{LobbyClientKick, LobbyKick, LobbyKickSuccess};
 use crate::networking::packethandler::packets::lobby::leave::{LobbyLeave, LobbyLeaveSuccess, LobbyLeftEvent};
+use crate::networking::ratecache::RateCache;
 use crate::networking::server::lobby_handler::LobbyManagerHandle;
 use crate::networking::server::tcp::tcp_client_handle::{TCPClientInstanceCore, TCPClientInstanceHandle};
 use crate::util::{ClientCallback, EncryptionState, ServerCallback};
@@ -51,31 +54,55 @@ macro_rules! register_packets {
                     REGISTERED_PACKET_COUNT
                 }
 
-                pub fn get_id(&self) -> u8 {
+                /// `None` for the internal `None` / `Kill` variants, which have no wire id.
+                pub fn get_id(&self) -> Option<u8> {
                     match self {
                         $(
-                        AnyPacket::[<$packet Packet>](p) => p.get_id(),
+                        AnyPacket::[<$packet Packet>](p) => Some(p.get_id()),
                         )*
-                        _ => 0,
+                        _ => None,
                     }
                 }
 
-                pub async fn on_trigger_server_tcp(&mut self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+                pub async fn on_trigger_server_tcp(&mut self, client_core: &mut TCPClientInstanceCore, rate_limiter: &mut RateCache, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
                     let owned = std::mem::replace(self, AnyPacket::None);
                    
                     match owned {
                         $(
                         AnyPacket::[<$packet Packet>](p) => {
-                            let result = p.on_trigger_server_tcp(client_core, lobby_manager).await;
-                            if p.is_awaitable_server() {
-                                println!("Is awaitable_server");
 
-                                if let Some(oneshot) = client_core.get_awaitable_cache().try_remove(p.get_nonce() as usize) {
+                            // A reply to a request the server is waiting on skips the
+                            // rate limiter. A reply with an unknown nonce is treated
+                            // like any other packet and gets rate-limited.
+                            let reply_waiter = if p.is_awaitable_server() {
+                                client_core.get_awaitable_cache().try_remove(p.get_nonce() as usize)
+                            } else {
+                                None
+                            };
 
-                                    let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
-                                }else {
-                                    return ServerCallback::Kill;
+                            if reply_waiter.is_none() {
+                                let Some(node) = rate_limiter.get_node(p.get_id() as usize) else {
+                                    client_core.send_client_error(&p, RessourceRateLimited).await;
+                                    return ServerCallback::Pass;
+                                };
+
+                                if !node.try_pass(Duration::from_millis([<$packet>]::CACHE_THRESHOLD as u64)) {
+                                    client_core.send_client_error(&p, RessourceRateLimited).await;
+                                    return ServerCallback::Pass;
                                 }
+
+                                // Checked after `try_pass` counted this packet, so the packet
+                                // that goes over the limit is the first one rejected.
+                                if node.get_cache_hit() > [<$packet>]::MAX_CACHE {
+                                    node.set_timeout(Duration::from_millis([<$packet>]::TIMEOUT as u64));
+                                    client_core.send_client_error(&p, RessourceRateLimited).await;
+                                    return ServerCallback::Pass;
+                                }
+                            }
+
+                            let result = p.on_trigger_server_tcp(client_core, lobby_manager).await;
+                            if let Some(oneshot) = reply_waiter {
+                                let _ = oneshot.send(AnyPacket::[<$packet Packet>](p));
                             }
                             return result;
                         },
@@ -233,7 +260,7 @@ pub async fn handle_packet(bytes: &mut BytesMut, client_core: &mut TCPClientCore
 pub struct TCPServerPacketHandler;
 
 impl TCPServerPacketHandler {
-    pub async fn handle_packet(bytes: &mut BytesMut, client_core: &mut TCPClientInstanceCore,  lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
+    pub async fn handle_packet(bytes: &mut BytesMut, rate_limiter: &mut RateCache, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
 
         loop {
 
@@ -241,7 +268,8 @@ impl TCPServerPacketHandler {
                 AnyPacket::Kill => return ServerCallback::Kill,
                 AnyPacket::None => return ServerCallback::Pass,
                 mut other => {
-                    match other.on_trigger_server_tcp(client_core, lobby_manager).await {
+
+                    match other.on_trigger_server_tcp(client_core, rate_limiter, lobby_manager).await {
                         ServerCallback::Pass => (),
                         other => return other,
                     }
@@ -319,11 +347,44 @@ mod tests {
         assert!(duplicates.is_empty(), "Duplicate packet IDs: {duplicates:?}");
     }
 
+    /// The rate limiter indexes `RateCache` by packet id, so ids must be exactly
+    /// `0..REGISTERED_PACKET_COUNT` with no gaps. Reports every missing id
+    /// (with the packets on either side of the gap) and every id that is out of range.
     #[test]
-    fn packet_id_zero_is_reserved() {
-        // `AnyPacket::get_id` returns 0 for `None` / `Kill`, so no real packet may use it.
-        for (name, id) in REGISTERED_PACKET_NAMES.iter().zip(REGISTERED_PACKET_IDS.iter()) {
-            assert_ne!(*id, 0, "{name} uses reserved packet id 0");
+    fn packet_ids_are_contiguous_from_zero() {
+        let name_of = |id: usize| -> Option<&str> {
+            REGISTERED_PACKET_IDS
+                .iter()
+                .position(|&p| p as usize == id)
+                .map(|i| REGISTERED_PACKET_NAMES[i])
+        };
+
+        let mut problems = Vec::new();
+
+        for id in 0..REGISTERED_PACKET_COUNT {
+            if name_of(id).is_none() {
+                let below = (0..id).rev().find_map(|i| name_of(i).map(|n| format!("{n} ({i})")));
+                let above = (id + 1..=u8::MAX as usize).find_map(|i| name_of(i).map(|n| format!("{n} ({i})")));
+                problems.push(format!(
+                    "missing id {id} (between {} and {})",
+                    below.as_deref().unwrap_or("<start>"),
+                    above.as_deref().unwrap_or("<end>"),
+                ));
+            }
         }
+
+        for (name, &id) in REGISTERED_PACKET_NAMES.iter().zip(REGISTERED_PACKET_IDS.iter()) {
+            if id as usize >= REGISTERED_PACKET_COUNT {
+                problems.push(format!(
+                    "{name} uses id {id}, but ids must be below {REGISTERED_PACKET_COUNT}"
+                ));
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "Packet ids must be 0..{REGISTERED_PACKET_COUNT} with no gaps:\n  {}",
+            problems.join("\n  ")
+        );
     }
 }

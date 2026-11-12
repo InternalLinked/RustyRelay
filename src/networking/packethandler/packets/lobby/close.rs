@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-#[packet_macro::packet(12, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(11, true, false, 128, 64, 30)]
 pub struct LobbyClose {
     
 }
@@ -13,7 +13,7 @@ impl LobbyClose {
     pub async fn on_trigger_server_tcp(&self, client_core: &mut TCPClientInstanceCore, lobby_manager: &mut LobbyManagerHandle<TCPClientInstanceHandle>) -> ServerCallback {
         
         match client_core.lobby_state {
-
+            
             LobbyState::Host { lobby_id, code: _ } => {
                 if let Err(e) = lobby_manager.close(lobby_id, client_core.get_client_handle().get_id()).await {
                     client_core.send_client_error(self, e).await;
@@ -54,7 +54,7 @@ impl LobbyClose {
 
 
 
-#[packet_macro::packet(13, true, false, false, 128, 64, 30)]
+#[packet_macro::packet(12, true, false, 128, 64, 30)]
 pub struct LobbyCloseSuccess {
     
 }

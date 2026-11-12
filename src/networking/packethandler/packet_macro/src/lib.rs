@@ -9,7 +9,6 @@ struct PacketProperties {
     id: u8,
     dynamic: bool,
     tcp: bool,
-    ip_based: bool,
     max_cache: usize,
     cache_threshold: usize,
     timeout: usize,
@@ -23,8 +22,6 @@ impl Parse for PacketProperties {
         input.parse::<Token![,]>()?;
         let dynamic: LitBool = input.parse()?;
         input.parse::<Token![,]>()?;
-        let ip_based: LitBool = input.parse()?;
-        input.parse::<Token![,]>()?;
         let max_cache: LitInt = input.parse()?;
         input.parse::<Token![,]>()?;
         let cache_threshold: LitInt = input.parse()?;
@@ -35,7 +32,6 @@ impl Parse for PacketProperties {
             id: id.base10_parse::<u8>()?,
             tcp: tcp.value(),
             dynamic: dynamic.value(),
-            ip_based: ip_based.value(),
             max_cache: max_cache.base10_parse::<usize>()?,
             cache_threshold: cache_threshold.base10_parse::<usize>()?,
             timeout: timeout.base10_parse::<usize>()?,
@@ -128,6 +124,9 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
     let id = properties.id;
     let is_dynamic = properties.dynamic;
     let is_tcp = properties.tcp;
+    let max_cache = properties.max_cache;
+    let cache_threshold = properties.cache_threshold;
+    let timeout = properties.timeout;
 
     let mut ast: DeriveInput = syn::parse(item).unwrap();
     let struct_name = ast.ident.clone();
@@ -385,6 +384,9 @@ pub fn packet(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub const CAPACITY: usize = #capacity;
             pub const DYNAMIC: bool = #is_dynamic;
             pub const TCP: bool = #is_tcp;
+            pub const MAX_CACHE: usize = #max_cache;
+            pub const CACHE_THRESHOLD: usize = #cache_threshold;
+            pub const TIMEOUT: usize = #timeout;
         }
 
         impl Packet for #struct_name {

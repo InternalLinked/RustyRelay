@@ -3,7 +3,7 @@ use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self};
 
-#[packet_macro::packet(4, true, false, 128, 64, 30)]
+#[packet_macro::packet(4, true, false, 3, 2000, 30000)]
 pub struct LobbyJoin {
     code: u64,
 }
@@ -54,7 +54,7 @@ impl LobbyJoin {
     }
 }
 
-#[packet_macro::packet(5, true, false, 128, 64, 30)]
+#[packet_macro::packet(5, true, false, 1, 1000, 60000)]
 pub struct LobbyJoinSuccess {
     lobby_id: u64,
     seat_id: u64
@@ -75,7 +75,7 @@ impl LobbyJoinSuccess {
     }
 }
 
-#[packet_macro::packet(13, true, false, 128, 64, 30)]
+#[packet_macro::packet(13, true, false, 1, 1000, 60000)]
 pub struct LobbyJoinedEvent {
     seat_id: u64
 }

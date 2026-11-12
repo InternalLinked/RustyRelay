@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-#[packet_macro::packet(10, true, true, 128, 64, 30)]
+#[packet_macro::packet(10, true, true, 120, 10, 2000)]
 pub struct LobbyBroadcast {
     author: u64
 }

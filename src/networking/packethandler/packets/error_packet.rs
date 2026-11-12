@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io::{self};
 
-#[packet_macro::packet(1, true, false, 128, 64, 30)]
+#[packet_macro::packet(1, true, false, 1, 1000, 60000)]
 pub struct RelayError {
     code: u8,
 }

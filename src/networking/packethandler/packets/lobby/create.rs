@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::sync::broadcast::error::SendError;
 use std::io::{self};
 
-#[packet_macro::packet(2, true, false, 128, 64, 30)]
+#[packet_macro::packet(2, true, false, 3, 1000, 10000)]
 pub struct LobbyCreate {
     
 }
@@ -54,7 +54,7 @@ impl LobbyCreate {
 }
 
 
-#[packet_macro::packet(3, true, false, 128, 64, 30)]
+#[packet_macro::packet(3, true, false, 1, 1000, 60000)]
 pub struct LobbyCreateSuccess {
     lobby_id: u64,
     lobby_code: u64

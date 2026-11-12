@@ -4,7 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::networking::packethandler::DynamicPacket;
 use std::io::{self};
 
-#[packet_macro::packet(11, true, false, 128, 64, 30)]
+#[packet_macro::packet(11, true, false, 3, 1000, 10000)]
 pub struct LobbyClose {
     
 }
@@ -54,7 +54,7 @@ impl LobbyClose {
 
 
 
-#[packet_macro::packet(12, true, false, 128, 64, 30)]
+#[packet_macro::packet(12, true, false, 1, 1000, 60000)]
 pub struct LobbyCloseSuccess {
     
 }

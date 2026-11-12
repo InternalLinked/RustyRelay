@@ -3,7 +3,7 @@ use crate::networking::packethandler::packet::Awaitable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::{self};
 
-#[packet_macro::packet(6, true, false, 128, 64, 30)]
+#[packet_macro::packet(6, true, false, 3, 1000, 10000)]
 pub struct LobbyLeave {
 }
 
@@ -76,7 +76,7 @@ impl LobbyLeave {
     }
 }
 
-#[packet_macro::packet(7, true, false, 128, 64, 30)]
+#[packet_macro::packet(7, true, false, 1, 1000, 60000)]
 pub struct LobbyLeaveSuccess {
 }
 
@@ -96,7 +96,7 @@ impl LobbyLeaveSuccess {
 }
 
 
-#[packet_macro::packet(14, true, false, 128, 64, 30)]
+#[packet_macro::packet(14, true, false, 1, 1000, 60000)]
 pub struct LobbyLeftEvent {
     seat_id: u64
 }

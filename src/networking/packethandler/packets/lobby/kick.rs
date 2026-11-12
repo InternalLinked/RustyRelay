@@ -6,7 +6,7 @@ use std::io::{self};
 
 
 /* Is getting send by the host to kick a client from it's lobby */
-#[packet_macro::packet(8, true, false, 128, 64, 30)]
+#[packet_macro::packet(8, true, false, 5, 500, 10000)]
 pub struct LobbyKick {
     seat_id: u64,
 }
@@ -81,7 +81,7 @@ impl LobbyKick {
 
 
 /* Packet that the client gets when it got kicked */
-#[packet_macro::packet(9, true, false, 128, 64, 30)]
+#[packet_macro::packet(9, true, false, 1, 1000, 60000)]
 pub struct LobbyClientKick {
 }
 
@@ -102,7 +102,7 @@ impl LobbyClientKick {
     }
 }
 
-#[packet_macro::packet(15, true, false, 128, 64, 30)]
+#[packet_macro::packet(15, true, false, 1, 1000, 60000)]
 pub struct LobbyKickSuccess {
 }
 

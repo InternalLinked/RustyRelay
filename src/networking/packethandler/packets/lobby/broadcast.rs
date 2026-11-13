@@ -33,10 +33,7 @@ impl LobbyBroadcast {
                     return ServerCallback::Kill;
                 }
                 
-                if let Err(e) = lobby_manager.send_host(lobby_id, self.get_self().clone()).await {
-                    client_core.send_client_error(self, e).await;
-                    return ServerCallback::Pass;
-                }
+                lobby_manager.send_host(lobby_id, self.get_self().clone()).await;
 
             }
             LobbyState::Host { lobby_id, code: _ } => {

@@ -101,6 +101,11 @@ impl TCPClientHandle {
             match TcpStream::connect(address).await {
 
                 Ok(stream) => {
+                    /* Disable Nagle's algorithm: game traffic is many small, latency-sensitive frames,
+                    and Nagle combined with delayed ACKs can hold a frame back for ~40ms */
+                    if let Err(e) = stream.set_nodelay(true) {
+                        println!("[Client] Failed to set TCP_NODELAY: {e}");
+                    }
                     let handle = TCPClientContext::instantiate(stream, relay_callback_writer, Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))).await;
                     let _ = sender.send(handle);
                 },

@@ -311,7 +311,7 @@ impl TCPClientContext {
                 /* Notify lobby that client left */
                 let mut left_event = LobbyLeftEvent::new(seat_id);
                 let left_event = left_event.encode(&mut core.write_buffer).unwrap();
-                let _ = self.lobby_manager.send_host(lobby_id, left_event).await;
+                self.lobby_manager.send_host(lobby_id, left_event).await;
 
             },
         }

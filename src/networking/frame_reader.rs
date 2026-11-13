@@ -1,6 +1,6 @@
-use std::io;
+use std::io::{self, IoSlice};
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}, net::TcpStream};
 
 use crate::networking::packethandler::packet::MAX_TCP_LENGTH;
@@ -143,8 +143,20 @@ impl<W: AsyncWrite + Unpin> FramedWriter<W> {
         }
  
         let header = (payload.len() as u32).to_be_bytes();
-        self.inner.write_all(&header).await?;
-        self.inner.write_all(&payload).await?;
+
+        /* Header and payload go out in a single vectored write (one syscall in the common case)
+        instead of two separate write_all calls, without copying them into one buffer first.
+        The loop handles partial writes: chunks_vectored always yields what is still left */
+        let mut frame = Buf::chain(&header[..], payload);
+        while frame.has_remaining() {
+            let mut slices = [IoSlice::new(&[]); 2];
+            let count = frame.chunks_vectored(&mut slices);
+            let written = self.inner.write_vectored(&slices[..count]).await?;
+            if written == 0 {
+                return Err(io::Error::from(io::ErrorKind::WriteZero).into());
+            }
+            frame.advance(written);
+        }
         Ok(())
     }
 }

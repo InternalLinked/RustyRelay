@@ -37,6 +37,11 @@ impl TCPServerCore {
 
             let (stream, address) = self.listener.accept().await?;
             println!("[Server] New connection from {}", address);
+            /* Disable Nagle's algorithm: relay traffic is many small, latency-sensitive frames, and
+            Nagle combined with delayed ACKs can hold a frame back for ~40ms */
+            if let Err(e) = stream.set_nodelay(true) {
+                println!("[Server] Failed to set TCP_NODELAY for {address}: {e}");
+            }
             /* The handshake runs on its own task, so a slow or silent peer can't stall the accept loop
             and a failed handshake only drops that one connection */
             let id = self.next_id;

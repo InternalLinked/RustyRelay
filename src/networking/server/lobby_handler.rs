@@ -247,12 +247,11 @@ pub enum LobbyInstruction<H: StreamHandle> {
     },
     /// Send `packet` to only the host of the lobby identified by `lobby_id`.
     ///
-    /// Replies with `Ok(())` on success, or [`SendableError::LobbyNotFound`] if the
-    /// lobby doesn't exist.
+    /// Fire-and-forget: carries no reply channel, so dispatching it allocates
+    /// nothing. If the lobby doesn't exist the instruction is silently dropped.
     SendHost {
         lobby_id: u64,
         packet: Bytes,
-        reply: oneshot::Sender<Result<(), SendableError>>,
     },
     /// Send `packet` to every member of the lobby identified by `lobby_id` — the
     /// host and all clients. Only issued by the relay itself (e.g. lobby events).
@@ -387,19 +386,10 @@ impl<H: StreamHandle> LobbyManager<H> {
                 }
             }
 
-            LobbyInstruction::SendHost {
-                lobby_id,
-                packet,
-                reply,
-            } => {
-                let result = match self.lobbies.get_mut(lobby_id as usize) {
-                    Some(lobby) => {
-                        lobby.send_host(packet).await;
-                        Ok(())
-                    }
-                    None => Err(SendableError::LobbyNotFound),
-                };
-                let _ = reply.send(result);
+            LobbyInstruction::SendHost { lobby_id, packet } => {
+                if let Some(lobby) = self.lobbies.get_mut(lobby_id as usize) {
+                    lobby.send_host(packet).await;
+                }
             }
 
             LobbyInstruction::RelayBroadcast { lobby_id, packet } => {
@@ -670,27 +660,20 @@ impl<H: StreamHandle> LobbyManagerHandle<H> {
 
     /// Sends `packet` to only the host of the lobby identified by `lobby_id`.
     ///
-    /// # Errors
-    ///
-    /// Returns [`SendableError::LobbyNotFound`] if the lobby doesn't exist.
+    /// Fire-and-forget: doesn't wait for a reply, so no `oneshot` channel is
+    /// allocated. It returns once the instruction is queued, and a nonexistent lobby
+    /// is silently ignored by the manager (this can only happen in the short window
+    /// while a lobby is being closed).
     ///
     /// # Panics
     ///
     /// Panics if the [`LobbyManager`] task is not running (it is expected to live as
     /// long as the server).
-    pub async fn send_host(&self, lobby_id: u64, packet: Bytes) -> Result<(), SendableError> {
-        let (reply, response) = oneshot::channel();
-
+    pub async fn send_host(&self, lobby_id: u64, packet: Bytes) {
         self.sender
-            .send(LobbyInstruction::SendHost {
-                lobby_id,
-                packet,
-                reply,
-            })
+            .send(LobbyInstruction::SendHost { lobby_id, packet })
             .await
             .expect("LobbyManager task is not running");
-
-        response.await.expect("LobbyManager dropped reply channel")
     }
 
     /// Sends `packet` to every member of the lobby identified by `lobby_id` — the

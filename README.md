@@ -13,8 +13,9 @@ message goes through the relay server.
 ## Table of contents
 
 1. [Core concepts](#core-concepts)
-2. [Running the server](#running-the-server)
-3. [Using the RelayClient (Rust)](#using-the-relayclient-rust)
+2. [Performance](#performance)
+3. [Running the server](#running-the-server)
+4. [Using the RelayClient (Rust)](#using-the-relayclient-rust)
    - [Connecting](#connecting)
    - [Hosting a lobby](#hosting-a-lobby)
    - [Joining a lobby](#joining-a-lobby)
@@ -23,11 +24,11 @@ message goes through the relay server.
    - [Kicking, leaving and closing](#kicking-leaving-and-closing)
    - [Latency](#latency)
    - [Disconnecting](#disconnecting)
-4. [Event reference](#event-reference)
-5. [Error reference](#error-reference)
-6. [Using the client from C# / other languages (FFI)](#using-the-client-from-c--other-languages-ffi)
-7. [Limits and notes](#limits-and-notes)
-8. [Usage of AI in this project](#usage-of-ai-in-this-project)
+5. [Event reference](#event-reference)
+6. [Error reference](#error-reference)
+7. [Using the client from C# / other languages (FFI)](#using-the-client-from-c--other-languages-ffi)
+8. [Limits and notes](#limits-and-notes)
+9. [Usage of AI in this project](#usage-of-ai-in-this-project)
 
 ---
 
@@ -56,6 +57,34 @@ The relay uses a **host-authoritative** model. Members never talk to each other 
 - The host can also send a message to **one specific member** (`send_explicit_lobby`).
 
 If members need to see each other's data, the host forwards it.
+
+---
+
+## Performance
+
+RustyRelay is built to be fast and efficient. The hot paths (receiving, decoding and relaying
+lobby messages) were written with a **zero-copy, zero-allocation** approach:
+
+- **Zero-copy framing:** incoming frames are split out of a reused read buffer
+  (`BytesMut::split_to` / `freeze`) instead of being copied into new buffers.
+- **Zero-copy decoding:** the packet macro reads fixed fields straight from the buffer and
+  splits off the payload without copying. Each packet keeps a refcounted view of its raw bytes.
+- **No re-encoding when relaying:** the server forwards the bytes it received to the host
+  or members. Sending one broadcast to several members only clones a refcounted
+  `Bytes` handle, so the payload is shared, not copied.
+- **Fire-and-forget routing:** relaying a message to the host or members never waits for a
+  reply, so no reply channels are allocated per message.
+- **Reused buffers:** each connection reuses its own read/write buffers for decryption and
+  encryption.
+- **Allocation-free rate limiting:** rate limits are tracked in a fixed-size array indexed by
+  packet id. No hashing and no allocation per packet.
+- **Low-latency sockets:** `TCP_NODELAY` is enabled on both ends (no Nagle delay), and each
+  frame's header and payload are sent in a single vectored write.
+
+Copies that can't be avoided: encryption and decryption write the data once into the reused
+buffers, and the FFI layer copies payloads across the language boundary so C# and Rust
+each own their memory. The read buffer may also grow now and then while forwarded packets
+are still queued, but that doesn't happen per message.
 
 ---
 
@@ -445,6 +474,7 @@ AI was used in this project for repetitive work, such as:
 - **FFI bindings**: writing the C ABI layer in `src/ffi.rs` used to generate the C# bindings.
 - **Packet macro cleanup**: making the code of my original packet macro
   (`src/networking/packethandler/packet_macro`) easier to read, since the first version was a mess.
+- **Tests**: the unit tests were written by AI.
 - **Documentation**: this README was written by AI.
 
 Everything else in this project was **designed and written by me**. Any AI-generated code is
